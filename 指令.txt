@@ -1,0 +1,802 @@
+﻿
+操作：
+
+编译烧录程序，打开串口（115200 波特率）
+观察启动日志，应能看到：
+
+>>开始以太网模块配置......
+>>配置以太网成功...OK          ← 说明 PHY 链路协商成功
+>>初始化LWIP协议栈成功...OK
+本地 IP: 192.168.x.x    本地端口:xxxx
+远程 IP: 192.168.x.x    远程端口:xxxx
+****************UDP CONNECTED********************
+观察网口指示灯：Link 灯亮 + Act 灯闪 = 物理链路 OK
+PC 端 ping 测试：
+
+ping 192.168.1.xxx    # MCU 的 IP
+若能 ping 通 → 网络层 OK；若不通 → 检查 IP 配置、子网掩码、PHY 时钟。
+
+第二步：UDP 发送测试（验证 WriteUDP）
+目的：验证 task_ethernet_entry 中 4 秒一次的发送。
+
+操作：
+
+PC 端打开网络调试助手：
+协议类型：UDP
+本地端口：设置为 DEST_PORT（MCU 发送的目标端口）
+绑定到与 MCU 同网段的 IP
+等待 4~5 秒，观察助手是否收到：
+ETHERNET SEND DATA 字符串
+后面 256 字节递增数据（0~255）
+同时串口应打印：send udp,length=256
+使用 Wireshark 抓包验证（推荐）：
+
+
+过滤条件：udp.port == 目标端口
+应能看到周期性的 UDP 数据包。
+
+第三步：UDP 接收测试（验证 ReadUDP + 接收回调）
+目的：验证 UDPRecvCallback 和接收任务。
+
+操作：
+
+保持网络调试助手打开
+在助手输入框中输入测试字符串（如 Hello MCU 12345），点击"发送"
+串口应输出：
+
+ UDP receive data�� Hello MCU 12345
+ UDP receive length�� 16
+如果没有打印 → 检查：
+DONT_USE_FREERTOS_QUEUE_RECEIVE_ETHERNET 宏定义（决定走环形缓冲区还是 FreeRTOS 队列分支）
+queue_ethernet_Handle 是否创建
+发送方是否用了正确的本地端口（即 MCU 绑定的端口）
+第四步：链路断开/重连测试
+目的：验证 Ethernet_LinkCheckTask。
+
+操作：
+
+程序运行正常后，拔掉网线
+串口应在 2~10 秒内打印：>>网线被拔除请检查...
+插回网线
+串口应打印：>>网线插入重新配置网络... → >>配置成功...OK
+重新测试发送/接收是否恢复
+
+这个IPMB协议的IPMB-A要与D:\LYT\胡工\HKV-6UHS310P2_回环 -
+需要外部上拉最新\HKV-6UHS310P2_260312这个项目的板子的IPMB-B完成协议通讯。
+我该发什么指令，硬件上SDA-SDA SCL-SCL已经连接。
+
+【2026-07-12 更新:IPMB 地址不再固定为 0x8E】从机地址改由背板槽位号(Slot_ID)动态决定——
+I2C-Address = 0x30 + (Slot_ID << 1)。槽位号由 GA0..GA4 五个 GPIO 读入(低电平有效/位取反,
+即 GPIO=0→该位=1, GPIO=1→该位=0)。GA 全高时 Slot_ID=0, 从机地址=0x30。
+主机(F407)通过 IPMB_Discovery_Task 后台扫描 0x30..0x6E 发现从机实际地址,发现前保留
+0x8E 作为兜底默认值。因此以下所有 ipmb/oemipmb 命令的 rsSA 字段请根据实际槽位号
+换算后填写(示例里仍用 0x8E, 实际值以主机串口打印 [IPMB-DISC] found slave at 0x?? 为准)。
+
+
+# ① Get Device ID (最优先测试)
+ipmb 8E 18 5A 20 00 01 DF
+ipmb 8E 18 5A 20 04 01 DB
+ipmb 30 18 B8 20 04 01 DB
+
+字节	值	校验
+rsSA(目标业务板地址)	8E	—
+netFn/lun	18h	netFn=06h,lun=0 ✓
+头校验	5A	-(8E+18) mod 256 = -(A6) = 5A ✓
+rqSA(主控板地址)	20	—
+rqSeq/lun	00	—
+cmd	01	Get Device ID ✓
+尾校验	DF	-(20+00+01) = -(21) = DF ✓
+两个校验和都对,是一条协议合规的 Get Device ID 请求帧。
+响应：<RSP-B 20 1C C4 8E 08 01 00 03 81 81 21 51 23 00 00 00 01 00 CE>
+
+字节	值	含义
+1	20	响应发给主控板(0x20)
+2	1C	netFn=07h(App Response)
+3	C4	头校验,-(20+1C)=C4 ✓
+4	8E	应答方 = 功能板自己(0x8E)
+5	08	rqSeq/lun:08h>>2=2→rqSeq=2,说明这是重启/复位计数后发的第3条命令(第1条=00,第2条=04,第3条=08),自增功能生效了
+6	01	回应命令 = Get Device ID
+7	00	完成码 = 成功
+8	03	Device ID = 3
+9	81	硬件版本:支持SDR,版本1
+10	81	固件大版本:1.0
+11	21	IPMC软件版本(BCD,低位=大版本高位=小版本):1.2
+12	51	IPMI协议版本 = V1.5
+13	23	设备类型 = 功能板(IPMC)
+14-16	00 00 00	厂家ID(占位,未配置真实值)
+17-18	01 00	产品ID = 1
+19	CE	尾校验
+
+
+
+
+# ② Get Board System Status (netFn=0x06,cmd=0x16)
+ipmb 8E 18 5A 20 00 16 CA
+
+# 同一条命令,第5位(rqSeq/lun)换成不同值,尾校验跟着重算(验证rqSeq透传/回显):
+# rqSeq/lun=04: sum(20+04+16)=0x3A, tail=-(0x3A)=C6
+ipmb 8E 18 5A 20 04 16 C6
+# rqSeq/lun=08: sum(20+08+16)=0x3E, tail=-(0x3E)=C2
+ipmb 8E 18 5A 20 08 16 C2
+
+字节	值	校验
+rsSA(目标业务板地址)	8E	—
+netFn/lun	18h	netFn=06h,lun=0 ✓
+头校验	5A	-(8E+18) mod 256 = -(A6) = 5A ✓
+rqSA(主控板地址)	20	—
+rqSeq/lun	00	需自己填对(ipmb <hex> 纯透传)
+cmd	16	Get Board System Status ✓
+尾校验	CA	-(20+00+16) mod 256 = -(36) = CA ✓
+请求只有7字节(无数据),两个校验和都对,是一条协议合规的请求帧。
+
+响应(22字节,固定部分+2处随实际状态变化的值):
+20 1C C4 8E 00 16 00 FF 01 FF FF FF FF FF FF FF FF TT FF VV 00 <尾校验>
+
+字节	值	含义
+1	20	响应发给主控板(0x20)
+2	1C	netFn=07h(App Response),-(8E+18)同一套修复过的响应位机制
+3	C4	头校验,-(20+1C)=C4 ✓
+4	8E	应答方 = 功能板自己(0x8E)
+5	00	rqSeq/lun回显
+6	16	回应命令 = Get Board System Status
+7	00	完成码 = 成功
+8	FF	CPU是否在位(占位,F103测不到host CPU)
+9	01	系统自检结果 = 通过
+10-11	FF FF	CPU利用率(占位)
+12-13	FF FF	内存利用率(占位)
+14-15	FF FF	第一路带宽(FFFF=无网络信息)
+16-17	FF FF	第二路带宽(FFFF=无网络信息)
+18	TT	CPU采集温度 = 实测温度+128(LM75A真实值,随环境变化)  //从机板子0x90传感器温度
+19	FF	操作系统版本(占位)
+20	VV	固件版本 = g_fru_state.ipmc_version(借用IPMC版本号,出厂默认12h,若测过⑧节09h命令会跟着变)
+21	00	保留字节(第17项,协议里确认过是留空保留位,不是多余bug)
+22	—	尾校验,覆盖 index3..20,因TT/VV随状态变化需现场重算:
+	  -(8E+00+16+00+FF+01+FF+FF+FF+FF+FF+FF+FF+FF+TT+FF+VV+00) mod 256
+
+**已知情况**:CPU在位/自检细分/CPU利用率/内存利用率/带宽/OS版本这几项都是占位符0xFF(硬件限制,F103拿不到host系统的运行状态,不算bug);只有CPU温度(真实LM75A测量)和固件版本(借用IPMC版本)是真实值。
+
+# ③ Get Slot (netFn=0x06,cmd=0x15)
+ipmb 8E 18 5A 20 00 15 CB
+
+# 第5位(rqSeq/lun)换成04,尾校验重算: sum(20+04+15)=0x39, tail=-(0x39)=C7
+ipmb 8E 18 5A 20 04 15 C7
+
+字节	值	校验
+rsSA(目标业务板地址)	8E	—
+netFn/lun	18h	netFn=06h,lun=0 ✓
+头校验	5A	-(8E+18) mod 256 = -(A6) = 5A ✓
+rqSA(主控板地址)	20	—
+rqSeq/lun	00	需自己填对(ipmb <hex> 纯透传)
+cmd	15	Get Slot ✓
+尾校验	CB	-(20+00+15) mod 256 = -(35) = CB ✓
+请求只有7字节(无数据),两个校验和都对,是一条协议合规的请求帧。
+
+响应(9字节,SS=槽位号随硬件GA0~GA4引脚电平变化):
+20 1C C4 8E <rqSeq回显> 15 00 SS <尾校验>
+
+字节	值	含义
+1	20	响应发给主控板(0x20)
+2	1C	netFn=07h(App Response)
+3	C4	头校验,-(20+1C)=C4 ✓
+4	8E	应答方 = 功能板自己(0x8E)
+5	00	rqSeq/lun回显
+6	15	回应命令 = Get Slot
+7	00	完成码 = 成功
+8	SS	槽位号,真实读取GA0~GA4(PA8..PC6)这5个GPIO拼出来的0~31编号,不是占位符
+9	—	尾校验,-(8E+00+15+00+SS) mod 256,随SS变化需现场重算
+
+**已实现,读的是真实硬件**:`read_slot_from_gpio()` 逐位读取 GA0~GA4 共5个GPIO(GAP校验位不计入),拼出实际槽位号,不涉及占位符,这条命令没有已知问题。
+
+# ④ Get Device SDR (标准分页读取,reservation ID + record ID + 偏移量 + 读取长度)
+# 头校验: -(8E+10) mod 256 = -(9E) = 62
+# 尾校验(覆盖 04h-0ch,即 rqSA..读取长度): -(20+00+21+00+00+00+00+00+FF) mod 256 = -(40) = C0
+ipmb 8E 10 62 20 00 21 00 00 00 00 00 FF C0    （校验必须算对，不然读取到的是上次缓存区中的遗留值）
+ipmb 8E 10 62 20 00 21 00 00 01 00 00 FF BF
+
+字节	值	校验
+rsSA(目标业务板地址)	8E	—
+netFn/lun	10h	netFn=04h,lun=0 ✓
+头校验	62	-(8E+10) mod 256 = -(9E) = 62 ✓
+rqSA(主控板地址)	20	—
+rqSeq/lun	00	需自己填对(ipmb <hex> 已恢复纯透传,固件不再自动改写)
+cmd	21	Get Device SDR ✓
+reservation ID	00 00	LS/MS。标准IPMI里这个字段配合"Reserve SDR Repository"命令用,
+  作用是并发安全校验:主机先预留仓库拿到一个reservation ID,之后读取时带上这个ID;
+  如果仓库内容在读取过程中被别的主机改动过(记录被增删),这个ID会失效,从机会告诉
+  主机"你的编号可能不准了,重新来"。我们这没实现"Reserve SDR Repository"命令,
+  仓库也是写死的5条记录、不会被增删,不存在并发问题,所以代码里根本没读取
+  req[6]/req[7]这两个字节参与判断——位置是对的,但填什么值都不影响结果
+record ID	00 00	LS/MS,选第几条记录。仓库目前固定5条(0~4),每条对应一个传感器:
+  0 = 90Temp(LM75A@0x90)
+  1 = 92Temp(LM75A@0x92)
+  2 = V12(ADC PA6)
+  3 = V0.75(ADC PA7+PB0平均)
+  4 = Iout(BPD20550 PMBus,最后一条,响应的next record ID会是FFFF)
+  ≥5 = 超出范围,完成码返回 C9(IPMB_CC_DATA_OUT_OF_RANGE)
+这次示例填00 00,读的是第0条(90Temp)
+偏移量	00	从记录内偏移0处开始读取(这是"记录内部"的偏移,不是 record ID——record ID 选的是第几条记录,偏移量选的是这一条记录内部从第几个字节开始读。比如某条记录是[0]=sensorId [1]=sensorType [2..15]=sensorName,若偏移量填02、读取长度填0E(14),就是跳过前2字节只读sensorName这14字节;偏移量填00才是从记录最开头读起)
+读取长度	FF	FFh代表读取整条记录
+尾校验	C0	-(20+00+21+00+00+00+00+00+FF) mod 256 = -(40) = C0 ✓(需自己算对,固件不再重算)
+两个校验和都对,是一条协议合规的 Get Device SDR 请求帧。
+
+【2026-07-12 更新:已接入真实 SDR 记录,5路传感器全部真实采集】record ID 0..4 依次对应
+5个传感器(90Temp、92Temp、V12、V0.75、Iout),每条记录16字节:
+[0]=sensorId(1..5) [1]=sensorType(1温度/2电压/3电流) [2..15]=sensorName(14字节,不足补0x00)。
+record ID=0(本例)对应90Temp传感器,名称"90Temp"。
+
+响应：<RSP-B 20 14 CC 8E 00 21 00 01 00 01 01 39 30 54 65 6D 70 00 00 00 00 00 00 00 TT>
+
+字节	值	含义
+1	20	响应发给主控板(0x20)
+2	14	netFn=05h(Sensor Response,04h+响应位)
+3	CC	头校验,-(20+14)=CC ✓
+4	8E	应答方 = 功能板自己(0x8E)
+5	00	rqSeq/lun回显=0(本次命令序号)
+6	21	回应命令 = Get Device SDR
+7	00	完成码 = 成功(请求长度≥13,长度校验通过)
+8-9	01 00	next record ID = 1(还有下一条,record ID 0..4共5条)
+10	01	sensorId = 1(90Temp)
+11	01	sensorType = 1(温度,附录一类型代号)
+12-25	39 30 54 65 6D 70 00 00 00 00 00 00 00 00	sensorName = "90Temp"(ASCII,不足14字节补0x00)
+26	TT	尾校验,-(8E+00+21+00+01+00+01+01+39+30+54+65+6D+70+00×7)=随传感器名变化需重算
+
+想读其他传感器,把 record ID(字节8-9)改成 1~4(92Temp/V12/V0.75/Iout),记得重算尾校验;
+读到 record ID=4(最后一条)时,响应里 next record ID 会变成 FFFF(无更多记录)。
+
+# ⑤ Get Sensor Reading - 目前接了真实硬件、能读到实际值的全部传感器
+# (rqSeq占位填00,尾校验已算好,可直接发;响应结构固定11字节:
+#  20 14 CC 8E <rqSeq回显> 2D 00 <LSB> <MSB> <状态> <尾校验>,
+#  2026-07-20起改为×100定点16位精度,详见下方"返回值统一说明")
+
+# 温度0 (sensor 0x04, LM75A@0x90)
+ipmb 8E 10 62 20 00 2D 04 AF
+
+# 温度1 (sensor 0x20, LM75A@0x92)
+ipmb 8E 10 62 20 00 2D 20 93
+
+# 12V电压 (sensor 0x03, ADC PA6)
+ipmb 8E 10 62 20 00 2D 03 B0
+
+# 5V电压 (sensor 0x17, ADC PC0/VRD_MOS。2026-07-06更正:PC0实际测的是5V不是3.3V,
+# 原来错误占用sensor 0x16(协议定义3.3V)的现已改为sensor 0x17(协议定义5V);
+# 板子现阶段没有独立3.3V测点,sensor 0x16 暂无测量源)
+ipmb 8E 10 62 20 00 2D 17 9C
+
+# 0.75V电压 (sensor 0x19, ADC PA7+PB0 平均)
+ipmb 8E 10 62 20 00 2D 19 9A
+
+# 风扇档位 (sensor 0x41, PWM占空比)
+ipmb 8E 10 62 20 00 2D 41 72
+
+# 12V输入电流 (sensor 0x07, BPD20550 PMBus, 2026-07-06新接入)
+ipmb 8E 10 62 20 00 2D 07 AC
+
+# --- 从机地址为 0x30 时（可直接复制；头校验=C0,-(30+10)=C0 ✓;
+#     后面字节从rqSA起都不含rsSA,尾校验和0x8E版完全一样,不用重算） ---
+
+# 温度0 (sensor 0x04, LM75A@0x90)
+ipmb 30 10 C0 20 00 2D 04 AF
+
+# 温度1 (sensor 0x20, LM75A@0x92)
+ipmb 30 10 C0 20 00 2D 20 93
+
+# 12V电压 (sensor 0x03, ADC PA6)
+ipmb 30 10 C0 20 00 2D 03 B0
+
+# 5V电压 (sensor 0x17, ADC PC1/VRD_MOS)
+ipmb 30 10 C0 20 00 2D 17 9C
+
+# 0.81V电压 (sensor 0x19, ADC PC3+PC4 平均)
+ipmb 30 10 C0 20 00 2D 19 9A
+
+# 风扇档位 (sensor 0x41, PWM占空比)
+ipmb 30 10 C0 20 00 2D 41 72
+
+# 12V输入电流 (sensor 0x07, BPD20550 PMBus)
+ipmb 30 10 C0 20 00 2D 07 AC
+
+【返回值统一说明】(2026-07-20更新:恢复16位精度,原"1字节截断值+固定80+固定C0"
+改为"LSB+MSB+压缩状态字节",详见下方)
+响应固定11字节:
+20 14 CC 8E <rqSeq回显> 2D 00 <LSB> <MSB> <状态> <尾校验>
+字节位置(index从0数):
+  index6 = 00           完成码,成功
+  index7 = LSB           ×100定点值低字节
+  index8 = MSB           ×100定点值高字节(原来固定80,现在真正传数值)
+  index9 = 状态           bit7=事件上报使能(原index8 bit7迁移过来,恒1) bit6=保留(0)
+                         bits5:0=阈值状态位(目前恒为0,没做阈值判断)
+  index10 = 尾校验
+
+**index7-8合起来的编码规则,所有传感器统一(×100定点,小端序有符号int16)**:
+把两字节按小端序拼成 `(int16_t)(index7 | (index8<<8))`,再除以100.0得到工程值:
+  温度传感器 → 摄氏度,分辨率0.01°C(如 0x09C4=2500 → 25.00℃)
+  电压传感器 → 伏特,分辨率0.01V(如 12.34V 编码成 0x04D2=1234)
+  电流传感器 → 安培,分辨率0.01A(如 2.7A 编码成 0x010E=270)
+  风扇 → PWM占空比整数值,0-100,不缩放(不用除以100)
+无效读数(传感器未连接/未采集成功)仍用哨兵值 0x7FFF 表示,不受×100缩放影响。
+
+**原来"0.75V这路电压截断成整数后恒为0"的已知限制已随本次改动解决**(那是旧1字节格式的先天缺陷,
+现改名V0.81 后能看到接近真实值的两位小数,不再恒为0)。
+
+**重要:这是不兼容的协议改动**,主机(F407)侧解析这条命令响应的逻辑必须同步改成
+"LSB+MSB拼int16再除以100.0",否则会把新的MSB/状态字节当成旧格式里的固定值(80/C0)误读。
+
+# ⑦ Platform Event Message (netFn=0x04,cmd=0x02)——F407轮询,F103每次都如实
+# 汇报g_fru_state当前真实状态(2026-07-07最终版)
+#
+# 演变过程(仅作记录):
+#  07-06 第1版:F103内部排队+F407轮询清空,响应带完成码
+#  07-07 第2版:用户要求去掉完成码,帧结构改成模拟"主动上报"原协议的样子(用
+#        IPMB_Build_Request而不是IPMB_Build_Response拼帧)
+#  07-07 第3版(当前):用户说现阶段不需要真的做自动阈值检测,只要这条命令每次
+#        回的都是真实数据——**去掉了"事件队列取走就清空、空了就填FF"这套模型**,
+#        改成每次轮询都直接读 g_fru_state 当前真实值,永远是真实数据,不会再
+#        出现FF占位。阈值超限(⑧节0x05)/正常(0x06)命令仍然保留,作用变成
+#        "手动修改g_fru_state这几个状态字段"(不再单独入队PEM事件)。
+#
+# F407 每5秒自动轮询一次(`IPMB_PEM_Poll_Task`,`User\uart\task_usart.c`),
+# 串口日志会自动出现 `<RSP-A/B ...>`;下面这条命令是想立刻手动查看一次用的,
+# 原理和自动轮询发的是同一条命令。
+ipmb 8E 10 62 20 00 02 DE
+
+字段编码规则:
+  data[0]=EvmRev(04h固定) data[1]=传感器类型(F0h固定) data[2]=传感器编号(00h固定)
+  data[3]=事件及类型:[7]=!threshold_exceeded(0=超限中,1=正常) [6:0]=6Fh(自定义状态事件)
+  data[4]=事件数据1:[7:4]=Ah固定 [3:0]=当前sys_state(0/1/4/6/7)
+  data[5]=事件数据2:[7:4]=cause状态变化原因 [3:0]=之前prev_sys_state
+  data[6]=事件数据3=FRU Device ID,固定0
+
+期望响应(14字节,无完成码字段;示例1:板子刚上电、从没触发过阈值超限,
+sys_state一直是M0/正常,假设是第1次调用这个响应函数、rqSeq=00):
+20 10 D0 8E 00 02 04 F0 00 EF A0 00 00 ED
+
+字节	值	含义
+1	20	目标=主控板(0x20)
+2	10	netFn=04h(原始值,不加响应位,因为这是模拟"主动发送"不是"响应")
+3	D0	头校验,-(20+10)=D0 ✓
+4	8E	源=F103自己(发送方)
+5	00	rqSeq:F103自己的PEM发送序号,每调用一次这个函数就自增1,和轮询请求里的rqSeq、和ipmb/ipmboem的计数器都无关
+6	02	命令码=Platform Event Message
+7	04	EvmRev固定
+8	F0	传感器类型固定
+9	00	传感器编号固定
+10	EF	事件及类型:threshold_exceeded=0(正常)→bit7=1,[6:0]=6Fh → 0x80|0x6F=EF
+11	A0	事件数据1:高4位A固定,低4位=当前state=0(M0,一直正常)
+12	00	事件数据2:高4位=cause=0(NORMAL),低4位=之前state=0(M0)
+13	00	事件数据3=FRU Device ID固定0
+14	ED	尾校验
+
+示例2:先发过⑧节"阈值超限"(0x05)命令一次之后再轮询,sys_state从M0→M1:
+20 10 D0 8E 00 02 04 F0 00 6F A1 10 00 5C
+(第10字节变成6F:threshold_exceeded=1→bit7=0;第11字节A1:当前state=1;
+第12字节10:cause=1(THRESHOLD_HI),之前state=0)
+
+**注意**:
+1. 第11-12字节(当前state、变化原因)会跟着你实际测过哪些改状态的命令(阈值超限/正常、复位、上电、断电等)变化,不是固定值,尾校验要跟着现场情况重算,不能直接照抄这两个例子。
+2. 第5字节(rqSeq)是F103自己每被调用一次就自增一次(不管是被自动轮询还是手动轮询触发的),和你发的轮询请求里填的rqSeq**没有关系**。
+3. 这个响应**现在没有"无事件占位FF"这个概念了**——永远是真实的当前状态快照,哪怕系统一直正常(没触发过阈值超限),也会老老实实报"当前正常"的真实数据(而不是FF占位),这是和前两版最大的区别。
+
+# ⑧ Set FRU Activation (IPMI控制命令,netFn=0x2C,cmd=0x0C)
+# 请求帧 rsSA=8E netFn/lun=B0h(netfn=2Ch<<2) rqSA=20 rqSeq/lun cmd=0C VSO=03(固定)
+# FRU_ID=00(暂只支持1个FRU) 控制请求(见下表) 尾校验
+# 头校验: -(8E+B0) mod 256 = -(3E) = C2
+# 尾校验(覆盖 rqSA..控制请求): -(20+rqSeq+0C+03+00+控制请求) mod 256
+
+# 上电 (control_req=0x01)
+ipmb 8E B0 C2 20 00 0C 03 00 01 D0
+
+# 断电 (control_req=0x00)
+ipmb 8E B0 C2 20 00 0C 03 00 00 D1
+
+# 复位 (control_req=0x02)
+ipmb 8E B0 C2 20 00 0C 03 00 02 CF
+
+# 软关机 (control_req=0x03)//和断电做的同一逻辑
+ipmb 8E B0 C2 20 00 0C 03 00 03 CE
+
+# 软复位 (control_req=0x04)//和复位用的同一逻辑。
+ipmb 8E B0 C2 20 00 0C 03 00 04 CD
+
+# 阈值超限 (control_req=0x05)——2026-07-06新增:会顺带入队一条PEM事件,见下面⑦节测试
+ipmb 8E B0 C2 20 00 0C 03 00 05 CC
+
+# 阈值正常 (control_req=0x06)——同样会入队一条PEM事件(dir=消除)
+ipmb 8E B0 C2 20 00 0C 03 00 06 CB
+
+# --- 从机地址为 0x30 时（可直接复制；头校验=20） ---
+# 上电 (control_req=0x01)
+ipmb 30 B0 20 20 00 0C 03 00 01 D0
+
+# 断电 (control_req=0x00)
+ipmb 30 B0 20 20 00 0C 03 00 00 D1
+
+# 复位 (control_req=0x02)
+ipmb 30 B0 20 20 00 0C 03 00 02 CF
+
+# 软关机 (control_req=0x03)
+ipmb 30 B0 20 20 00 0C 03 00 03 CE
+
+# 软复位 (control_req=0x04)
+ipmb 30 B0 20 20 00 0C 03 00 04 CD
+
+# 阈值超限 (control_req=0x05)
+ipmb 30 B0 20 20 00 0C 03 00 05 CC
+
+# 阈值正常 (control_req=0x06)
+ipmb 30 B0 20 20 00 0C 03 00 06 CB
+
+# 设置IPMC软件版本 (control_req=0x09,带1字节额外数据:版本号,低4位=大版本x,高4位=小版本y,如2.1=12h)
+# 比前面几条多1字节(版本号),总长11字节,尾校验范围也多算这1字节
+# 尾校验: -(20+00+0C+03+00+09+12) mod 256 = -(4A) = B6
+ipmb 8E B0 C2 20 00 0C 03 00 09 12 B6
+ipmb 8E B0 C2 20 00 0C 03 00 09 14 B4
+
+05h 设阈值超限 / 06h 设阈值正常:**不驱动任何GPIO**,只改内部状态(`threshold_exceeded`/`sys_state`/`cause`),纯软件记录
+07h 设风扇默认档位:**不驱动PWM**,只把请求带的1字节数据存进 `g_fru_state.fan_default_level`
+08h 设风扇最大转速:**不驱动PWM**,把请求带的2字节数据(低字节在前)存进 `g_fru_state.fan_max_rpm`
+10h/11h 设置I2C速率100K/400K:**空桩**,只打印"stub"提示、返回成功,不真正切换I2C时钟速率(2026-07-03就确认过的已知遗留项)
+
+【返回值统一说明】
+响应固定9字节(2026-07-06起,原为10字节,已去掉协议外多余的填充字节data[1]=0):
+20 B4 2C 8E <rqSeq回显> 0C 00 03 63
+(假设请求 rqSeq=00 且执行成功;控制码不同,只要都成功,响应内容完全一样,
+ 因为响应只回显VSO=03和完成码,不回显具体是哪个控制请求)
+字节位置:
+  index6 = 00    完成码,成功为00,VSO≠03或控制码无法识别时返回C2(IPMB_CC_INVALID_DATA_FIELD)
+  index7 = 03    VSO命令号回显,固定值
+  index8 = 63    尾校验
+
+**control_req 逐个实现说明**(`ipmb_fru.c` `IPMB_FRU_HandleControl`):
+
+| control_req | 功能 | 实现行为 | 测试命令(见上方⑧节示例) |
+|---|---|---|---|
+| 00h | 断电 | PWR_CTL(PA4)拉高;power_state=0;sys_state=M0,cause=USER_REQUEST | 已在上方(第397行) |
+| 01h | 上电 | PWR_CTL(PA4)拉低;power_state=1;sys_state=M0,cause=POWER_ON | 已在上方(第397行上一条) |
+| 02h | 复位 | 置`powerrst_flag=1`,由`bsp_gpio.c`的`GPIO_Task`异步产生PA12(BMC_CTRL_SYSRST)拉高→延时→拉低的复位脉冲,本命令立即返回,不阻塞IPMB响应;sys_state=M0,cause=RESET | 已在上方(第403行) |
+| 03h | 软关机 | 和00h断电完全同一套动作,额外记录soft_state=0 | 已在上方(第406行) |
+| 04h | 软复位 | 和02h复位同一套PA12脉冲逻辑,额外把soft_state取反;cause=RESET | 已在上方(第409行) |
+| 05h | 阈值超限 | **不驱动任何GPIO**,只改`g_fru_state`:threshold_exceeded=1,sys_state=M1,cause=THRESHOLD_HI/LO(取决于是否带额外数据);⑦节PEM轮询会实时读到这个状态 | 已在上方(第412行) |
+| 06h | 阈值正常 | 同上,只改状态:threshold_exceeded=0,sys_state=M0,cause=NORMAL | 已在上方(第415行) |
+| 07h | 设风扇默认档位 | **不驱动PWM**,把请求带的1字节数据存进`g_fru_state.fan_default_level` | 见下方新增 |
+| 08h | 设风扇最大转速 | **不驱动PWM**,把请求带的2字节数据(低字节在前)存进`g_fru_state.fan_max_rpm` | 见下方新增 |
+| 09h | 设置IPMC软件版本 | 把请求带的1字节数据存进`g_fru_state.ipmc_version` | 已在上方(第420-421行) |
+| 10h | 设置I2C通讯速率100Kbps | **空桩**,只打印提示、返回成功,不真正切换I2C时钟(已知遗留项,2026-07-03确认) | 见下方新增 |
+| 11h | 设置I2C通讯速率400Kbps | 同上,空桩 | 见下方新增 |
+| 其它值 | 未定义 | 落入`default`分支,返回0xFF→响应完成码C2(IPMB_CC_INVALID_DATA_FIELD) | — |
+
+# 07h 设风扇默认档位(带1字节数据:档位值,示例设为05)
+# 尾校验: -(20+00+0C+03+00+07+05) mod 256 = -(3B) = C5
+ipmb 8E B0 C2 20 00 0C 03 00 07 05 C5
+期望响应(9字节,和其它成功响应一样): 20 B4 2C 8E 00 0C 00 03 63
+
+# 08h 设风扇最大转速(带2字节数据,低字节在前;示例设为3000rpm=0BB8h→低B8高0B)
+# 尾校验: -(20+00+0C+03+00+08+B8+0B) mod 256 = -(FA) = 06
+ipmb 8E B0 C2 20 00 0C 03 00 08 B8 0B 06
+期望响应(9字节): 20 B4 2C 8E 00 0C 00 03 63
+
+# 10h 设置I2C通讯速率100Kbps(无额外数据)
+# 尾校验: -(20+00+0C+03+00+10) mod 256 = -(3F) = C1
+ipmb 8E B0 C2 20 00 0C 03 00 10 C1
+期望响应(9字节): 20 B4 2C 8E 00 0C 00 03 63
+
+# 11h 设置I2C通讯速率400Kbps(无额外数据)
+# 尾校验: -(20+00+0C+03+00+11) mod 256 = -(40) = C0
+ipmb 8E B0 C2 20 00 0C 03 00 11 C0
+期望响应(9字节): 20 B4 2C 8E 00 0C 00 03 63
+
+说明:07h/08h/10h/11h这四条目前都不驱动任何硬件(风扇档位/转速只存变量,I2C速率只打印不切换),
+所以测试时无法从外部现象(风扇转速、I2C波形)验证,只能靠F103串口`printf`日志确认数值是否被正确存入
+(比如07h测完后可以配合⑥节Get Sensor Reading读风扇传感器0x41,但那个读的是PWM实际占空比,不是
+fan_default_level这个存储值,两者现阶段没有关联,这也是空桩实现的已知限制)。
+
+
+=====================================================================
+⑩ 主机端 IPMB 仲裁(F407 I2C1/I2C2 主机模式)——2026-07-12新增
+=====================================================================
+# 对应从机侧的需求2(A优先/故障切B),主机侧也做了对称的仲裁逻辑:
+#   主机默认用 IPMB-A(I2C1)通信,只有 A 路连续失败时才切到 B 路。
+#   改动集中在 User\I2C\task_i2c.c——I2C1_Task、I2C2_Task、IPMB_Discovery_Task。
+
+【仲裁规则】
+1. 默认活跃总线 = IPMB-A(HOST_BUS_A),上电优先 A 路
+2. 普通命令(rqSA=0x20)只在当前活跃总线发送,非活跃总线收到后直接丢弃不发
+3. 发现探测(rqSA=IPMB_DISC_HOST_ADDR_7BIT=0x00)不受活跃总线限制,两路均允许发送,
+   用作后台探知从机在哪一路可达
+4. 活跃总线普通命令连续超时 ≥3 次(IPMB_HOST_FAILOVER_CNT),切换活跃总线到另一路,
+   串口打印 [IPMB-HOST-ARB] X timeout, switch to Y
+5. A 路恢复可达后(发现探测命中),自动切回 A(从 HOST_BUS_B 回到 HOST_BUS_A)
+6. 探测超时静默,不再打印 <ERR 2 timeout> 刷屏(探测 miss 是正常的)
+
+【效果】
+- 正常(从机在 A):上电后串口打印 [IPMB-DISC] found slave at 0x30 via A,
+  之后普通命令只走 A,B 路无超时日志、无刷屏
+- A 断线:主机连续 3 条普通命令超时后切 B,打印 [IPMB-HOST-ARB] A timeout, switch to B;
+  同时从机侧也会检测 A 3s 静默切到 B([IPMB-ARB] A timeout, switch to B)
+- A 恢复:下一轮发现重扫(≤15s)命中 A 后,主机切回 A,从机也会自动切回
+
+【实现位置】
+- 仲裁数据:task_i2c.c:76-80(g_host_active_bus, Host_Bus_t枚举,失败计数)
+- I2C1/I2C2_Task:普通命令非活跃丢弃(行512/611) + 探测超时静默(行566/662) + 失败切换(行568-571/664-667)
+- IPMB_Discovery_Task:发现命中 A 设 HOST_BUS_A 发现命中 B 设 HOST_BUS_B(行796/805)
+- ipmb_enqueue_both(task_usart.c:25-39)未改动,普通命令仍双入队双队列,
+  仲裁在 I2Cx_Task 取到队列时判断要不要真正发送
+---------------------OEM  IPMB----------------------
+
+# ⑨ Get Module Info (OEM补充协议,非标netFn=2Eh,cmd=12h)——传感器信息读取
+# 实现位置:F103 `ipmb_slave.c` `IPMB_Slave_Handle_GetModuleInfo`
+# 帧结构"非标处理":请求帧netFn字节直接写2E(不左移);响应帧netFn字节=(2E<<2)=B8(不加响应位)
+# 固定5个传感器,顺序:90Temp, 92Temp, V12, V0.75, Iout
+# (★2026-07-12更新:5路传感器全部接入真实采集,不再有dummy占位)
+
+**两种测试方式,互不影响:**
+
+1. `ipmboem <itemID列表>` —— F407自动构帧+自动算两个校验和,方便快速测试
+   例:`ipmboem 12`(只要传感器值) 或 `ipmboem 11 12`(传感器信息+传感器值都要)
+
+2. `oemipmb <完整16进制帧>` —— 2026-07-07新增,纯逐字节透传命令,固件不做任何
+   修改(校验和需自己手算),专门用来手动验证这条OEM协议的帧格式对不对。
+   实现和`ipmb <hex>`完全一样的透传逻辑(`task_usart.c`),只是单独换个命令名,
+   不影响`ipmb <hex>`命令本身 —— 遵循"手动验证类命令禁止自动纠正"的原则。
+
+# 示例1:只要item 0x12(所有传感器值),rqSeq=00
+# 头校验: -(8E+2E) mod 256 = -(BC) = 44
+# 尾校验(覆盖rqSA..itemID): -(20+00+12+01+12) mod 256 = -(45) = BB
+oemipmb 8E 2E 44 20 00 12 01 12 BB
+# 从机地址为0x30时（头校验: -(30+2E)=A2）:
+oemipmb 30 2E A2 20 00 12 01 12 BB
+
+请求帧逐字节说明(共9字节):
+字节	值	含义
+1	8E	响应地址=业务板(F103)IPMB地址,同时也是I2C硬件寻址字节
+2	2E	netFn=2Eh(OEM),非标不左移(响应帧才左移,见下方B8)
+3	44	头校验,-(8E+2E) mod 256 = -(BC) = 44,覆盖第1~2字节
+4	20	请求地址=主控板(F407)自己,0x20
+5	00	rqSeq/lun:高6位=rqSeq(此处00),低2位=lun(00)
+6	12	命令码=Get Module Info(见OEM命令表)
+7	01	item count=1(本次只请求1种数据项)
+8	12	itemID=0x12(要"所有传感器值";若要传感器信息则填0x11)
+9	BB	尾校验,-(20+00+12+01+12) mod 256 = -(45) = BB,覆盖第4~8字节
+
+回应：<RSP-B 20 B8 28 8E 00 12 00 01 12 00 14 01 VV VV 00 02 VV VV 00 03 VV VV 00 04 VV VV 00 05 VV VV 00 TT>
+
+字节	值	含义
+1	20	目标=主控板(0x20)
+2	B8	netFn=(2Eh<<2),不加响应位
+3	28	头校验,-(20+B8)=28 ✓
+4	8E	源=F103自己
+5	00	rqSeq回显=00
+6	12	命令码=Get Module Info
+7	00	完成码=成功
+8	01	item count=1(只请求了1种数据)
+9	12	itemID回显=0x12(传感器值)
+10	00	itemStatus=00,itemID有效
+11	14	itemLen=0x14=20(5传感器×4字节)
+itemData(20字节,4字节一组,顺序=90Temp/92Temp/V12/V0.75/Iout):
+
+分组	sensorId	读值(LE)	alarm	解读
+90Temp	01 VV VV 00	01	0xVVVV	00	LM75A@0x90 温度,单位0.1℃(如0x00C1=193→19.3℃);若读失败→reading=0x7FFF,alarm=08(未连接)
+92Temp	02 VV VV 00	02	0xVVVV	00	LM75A@0x92 温度,编码同上
+V12	03 VV VV 00	03	0xVVVV	00	ADC PA6 12V电压,单位0.1V(如0x00C1=193→19.3V)
+V0.75	04 VV VV 00	04	0xVVVV	00	ADC PA7+PB0 两路平均 0.75V电压,单位0.01V(厘伏,如0x004B=75→0.75V)
+Iout	05 VV VV 00	05	0xVVVV	00	BPD20550 PMBus 12V输入电流,单位0.1A(如0x001A=26→2.6A)
+| 32 | TT | 尾校验,覆盖第4~31字节 |
+
+★2026-07-12更新:5个传感器全部接入真实采集——90Temp(LM75A@0x90)、92Temp(LM75A@0x92)、V12(ADC PA6,分伏)、V0.75(ADC PA7+PB0平均,厘伏)、Iout(BPD20550)。原来dummy占位的3.3V电压/电流两路已移除,换成92Temp和V0.75。
+V0.75因原始值<1V,不再用分伏(×10)编码(会截成0),改用厘伏(×100)保证低值可读。
+
+
+# 示例2:同时要item 0x11(传感器信息)+item 0x12(传感器值),rqSeq=00
+# 尾校验: -(20+00+12+02+11+12) mod 256 = -(57) = A9
+oemipmb 8E 2E 44 20 00 12 02 11 12 A9
+oemipmb 8E 2E 44 20 04 12 02 11 12 A5
+# 从机地址为0x30时:
+oemipmb 30 2E A2 20 00 12 02 11 12 A9
+oemipmb 30 2E A2 20 04 12 02 11 12 A5
+请求帧逐字节说明(共10字节,和示例1的区别:item count=2,itemID列了两个):
+字节	值	含义
+1	8E	响应地址=业务板(F103)IPMB地址,同时也是I2C硬件寻址字节
+2	2E	netFn=2Eh(OEM),非标不左移
+3	44	头校验,-(8E+2E) mod 256 = -(BC) = 44,覆盖第1~2字节
+4	20	请求地址=主控板(F407)自己,0x20
+5	00	rqSeq/lun:高6位=rqSeq(此处00),低2位=lun(00)
+6	12	命令码=Get Module Info
+7	02	item count=2(本次请求2种数据项)
+8	11	itemID第1个=0x11(传感器信息:名称/类型,每传感器16字节)
+9	12	itemID第2个=0x12(所有传感器值,每传感器4字节)
+10	A9	尾校验,-(20+00+12+02+11+12) mod 256 = -(57) = A9,覆盖第4~9字节
+
+回应(共115字节 = 头8 + item0x11块83 + item0x12块23 + 尾校验1):
+
+【帧头8字节】
+字节	值	含义
+1	20	目标=主控板(0x20)
+2	B8	netFn=(2Eh<<2),不加响应位
+3	28	头校验,-(20+B8)=28 ✓
+4	8E	源=F103自己
+5	00	rqSeq回显=00
+6	12	命令码=Get Module Info
+7	00	完成码=成功
+8	02	item count=2(回显请求的2个item)
+
+【item#1:0x11 传感器信息块,共83字节】
+字节9  11	itemID=0x11
+字节10 00	itemStatus=00(有效)
+字节11 50	itemLen=0x50=80(5传感器×16字节)
+之后5条16字节记录 [sensorId(1)+sensorType(1)+sensorName(14)]:
+  记录1  01 01 "90Temp"+8个00        → id=1,类型1温度,名"90Temp"
+  记录2  02 01 "92Temp"+8个00        → id=2,类型1温度,名"92Temp"
+  记录3  03 02 "V12"+11个00          → id=3,类型2电压,名"V12"
+  记录4  04 02 "V0.75"+9个00         → id=4,类型2电压,名"V0.75"
+  记录5  05 03 "Iout"+10个00         → id=5,类型3电流,名"Iout"
+
+【item#2:0x12 传感器值块,共23字节】
+字节92 12	itemID=0x12
+字节93 00	itemStatus=00(有效)
+字节94 14	itemLen=0x14=20(5传感器×4字节)
+之后5组4字节 [sensorId+读值LE+告警]:
+  90Temp  01 VV VV 00	→ LM75A@0x90,单位0.1℃,读失败则 7F FF 08
+  92Temp  02 VV VV 00	→ LM75A@0x92,单位0.1℃,同上
+  V12     03 VV VV 00	→ ADC PA6,单位0.1V(分伏)
+  V0.75   04 VV VV 00	→ ADC PA7+PB0平均,单位0.01V(厘伏)
+  Iout    05 VV VV 00	→ BPD20550,单位0.1A
+
+【尾校验1字节】
+字节115 TT	覆盖第4~114字节
+
+★2026-07-12更新:5路传感器全部真实采集,不再有dummy 0xFF占位。V0.75改用厘伏(×100)编码避免<1V的低值被截断为0。
+
+
+
+=====================================================================
+⑪ F407 本地串口命令:风扇占空比控制(fan)——2026-07-08新增
+=====================================================================
+# 注意:这是F407本机的串口控制命令,不是IPMB协议帧,不发给F103,和上面
+#       ipmb/ipmboem/oemipmb 那些走I2C的命令完全无关。直接在USART1控制台输入。
+
+命令格式:
+  fan <占空比>        占空比 = 0~100(整数,单位%)
+
+作用:
+  一个占空比值同时控制F407的4路风扇(OCPWM1~4)。改完立即生效。
+  风扇转速不再按温度自动调节(原温控逻辑已去掉),完全由这条命令决定。
+
+示例:
+  fan 0       4路风扇全停(0%)
+  fan 30      4路风扇30%(开机默认值)
+  fan 50      4路风扇50%
+  fan 100     4路风扇满速
+回显:
+  <FAN all4 = 50%>       (超过100会自动裁到100)
+  输入没带数字时:<ERR fan: usage 'fan 0-100'>
+
+转速反馈:
+  每2秒的状态banner里 [TACH IN] RPM_1~4 会打印4路实测转速(TACH输入捕获,
+  硬件开机就在跑,和命令无关)。改完占空比后,下一次(≤2秒)banner就能看到
+  转速跟着变。banner同时显示 [PWM OUT] 当前占空比、[TEMP] 温度、[BPD20550] 电源。
+
+  ★2026-07-09修复:RPM_3(PH11/TIM5_CH2)采集异常的根因是 TACH3 和 TACH4(PH10/
+    TIM5_CH1)共用 TIM5,两路测量启动时都会清共享计数器,并发测量互相破坏基准,
+    先启动的一路周期算错。已按"方案A互斥"修复(bsp_pwm.c:s_tim5_owner,两路
+    轮流测量、数值锁存后交棒,另加1秒防饿死保护)。TACH3/4 刷新率减半,但
+    banner是2秒一读,无感知。RPM_1(TIM4)/RPM_2(TIM8)独享定时器,无此问题。
+
+实现位置:
+  - 命令解析:User\uart\task_usart.c 的 USART1_Task,分支 "fan "
+  - 占空比全局量+下发函数:User\I2C\task_i2c.c 的 g_fan_duty / Fan_Set_All_Duty()
+  - 周期下发+转速打印:User\I2C\task_i2c.c 的 Temp_Task(bsp_init.c 已启用)
+  - 默认占空比:g_fan_duty=30(开机风扇低速运转)
+
+
+=====================================================================
+⑫ F407 开关机 / 复位控制逻辑(电源按钮 + 串口命令)
+=====================================================================
+# 实现位置:User\gpio\bsp_gpio.c(GPIO_Task + PowerButton_EXTI/TIM6 中断)
+# 说明:这也是F407本机逻辑,不是IPMB帧。控制对象是"给电源板/CPLD的几个GPIO"。
+
+【涉及的引脚】
+  输入:
+    R15  = PB15 (BMC_GPIO3)      物理电源按钮,按下=拉低(EXTI)
+    N11  = PE13 (BMC_CPLD_GPIO2) CPLD发来的软关机指示,下降沿有效(EXTI)
+  输出:
+    R14  = PB14 (BMC_GPIO2)      通知电源板:高=上电,低=断电(核心输出)
+                                 ★上电默认=低电平(断电)——2026-07-08改,原为默认高。
+                                 即开机后默认不上电,要等 power on / 物理短按 才拉高。
+                                 (bsp_gpio.c GPIO_Power_Config:GPIO_ResetBits(PB14))
+    PA12 = BMC_CPLD_PWR_BTN       模拟"按CPLD电源按钮":低脉冲(开机短/关机长)
+    PE2  = BMC_OUT_SYS_RST        复位输出:100ms低脉冲
+    PE14 = LED_BMC_ALERT          状态心跳灯(300ms闪,和电源逻辑无关)
+
+【三层结构(为什么不在中断里直接干)】
+  ①EXTI中断:只记"发生了下降沿"(置去抖标志),不判断
+  ②TIM6 1ms中断:状态机——去抖、量按下时长、判短按/长按,投命令进 xGpioCmdQueue;
+                 同时负责 R14 的"20ms后翻转"延时输出、PA12脉冲的"到时拉回高"
+  ③GPIO_Task:从队列取命令→执行动作→打印日志;空闲时翻转心跳灯
+
+【6个命令:触发来源 → 动作】
+| 命令 | 触发 | 动作 |
+|---|---|---|
+| POWER_ON_BMC_CPLD_PWR_BTN | 串口 "power on" | PA12拉低→短脉冲后拉回高(模拟短按开机) + R14 20ms后拉高 |
+| POWER_OFF_BMC_CPLD_PWR_BTN| 串口 "power off"| PA12拉低→约5s后拉回高(模拟长按关机) + R14 20ms后拉低 |
+| RESET_BMC_OUT_SYS_RST | 串口 "reset" | PE2拉低100ms→拉回高(复位脉冲,阻塞式vTaskDelay) |
+| PWRBTN_SHORT_PRESS | 物理按钮R15短按(<2s) | R14 20ms后拉高 → 上电 |
+| PWRBTN_LONG_PRESS | 物理按钮R15长按(≥2s) | R14 20ms后拉低 → 强制断电 |
+| SOFT_PWRDN_FROM_CPLD | CPLD信号PE13下降沿 | R14 20ms后拉低 → 断电 |
+
+  注意区别:
+   - 串口 power on/off:同时动 PA12(模拟按电源键的低脉冲) 和 R14(直接通知);
+   - 物理按钮 / CPLD软关机:只动 R14(直接通知电源板)。
+
+【PA12 低脉冲时长(PWR_BTN状态机,每300ms计一次tick)】
+  - 开机:PWR_BTN_ON_HOLD_TICKS = 2  → 约600ms后把PA12拉回高(printf写的是"300ms",实际2×300ms)
+  - 关机:PWR_BTN_OFF_HOLD_TICKS = 17 → 约5.1s后把PA12拉回高(≈5s长按)
+  - PA12在 PowerOn/PowerOff 里立即拉低,拉回高由 GPIO_Task 的300ms tick推进(非阻塞)
+
+【R14(PB14)输出为什么延时20ms】
+  Set_BMC_GPIO2_With_20msDelay(target) 本身不碰引脚,只记"目标电平+20ms";真正翻转
+  在 TIM6 1ms中断里倒计时到0才 SetBits/ResetBits(PB14),给电源板一个稳定建立时间。
+
+【短按/长按判定】
+  阈值 BMC_GPIO3_SHORT_THRESHOLD_MS(<2s=短按上电,≥2s=长按断电);
+  一直按住不放超过 LONG_FORCE_MS 会强制报一次长按(防卡死);
+  按钮和PE13都有软件去抖(BMC_GPIO_DEBOUNCE_MS)。
+
+--- 串口测试命令(直接在USART1控制台输入) ---
+  power on        # 上电:PA12短脉冲 + R14拉高
+  power off       # 断电:PA12长脉冲(~5s) + R14拉低
+  reset           # 复位:PE2拉低100ms再拉高
+
+  预期串口日志(示例):
+   power on  → "BMC_CPLD PWR_BTN power on (300ms)..." 然后 "BMC_GPIO2 (PB14) -> HIGH"
+              再过约600ms "BMC_CPLD PWR_BTN power on done."
+   power off → "BMC_CPLD PWR_BTN power off (5s)..." 然后 "BMC_GPIO2 (PB14) -> LOW"
+              再过约5s "BMC_CPLD PWR_BTN power off done."
+   reset     → "BMC_OUT_SYS_RST reset done."(拉低100ms后)
+   物理短按  → "BMC_GPIO3 (PB15) short press -> power on" + "BMC_GPIO2 (PB14) -> HIGH"
+   物理长按  → "BMC_GPIO3 (PB15) long press -> force power off" + "BMC_GPIO2 (PB14) -> LOW"
+   CPLD软关机→ "BMC_CPLD_GPIO2 (PE13) soft power down" + "BMC_GPIO2 (PB14) -> LOW"
+
+  验证:用万用表/示波器量 PB14(R14)——上电类命令后约20ms翻高,断电类命令后约20ms翻低。
+
+
+
+TIM8 能同时干两件事，靠的是 STM32 通用/高级定时器的一个基本硬件特性：一个定时器只有一套计数器(CNT)/自动重装载(ARR)/预分频(PSC)，但有 4 个互相独立的捕获/比较通道(CH1~CH4)，每个通道可以单独配置成"输出比较(PWM)"或"输入捕获"模式。TIM8 上正好用了 3 个通道，2 个做 PWM 输出、1 个做输入捕获，共享同一个计数节拍。
+
+硬件层面：CNT 是唯一时基，CCRx 各自独立
+
+        CNT: 0 → 1 → 2 → ... → 199 → 0 (溢出, 20kHz)
+              │                  │
+   CH3(CCR3)──┤ 比较模式：CNT<CCR3 时 PC8 输出高电平 → FAN3 PWM
+   CH2(CCR2)──┤ 比较模式：CNT<CCR2 时 PI6 输出高电平 → FAN4 PWM
+   CH4(CCR4)──┘ 捕获模式：PI2 出现边沿时，硬件自动把当前 CNT 锁存进 CCR4
+CH3/CH2 是输出比较(OC)模式：硬件不停拿 CNT 和 CCR3/CCR2 比较，根据比较结果驱动引脚电平翻转，全程不需要 CPU 介入，只有占空比变化时才用 TIM_SetCompare3/2() 改一下 CCR 值（set_pwm_duty() 干的事）。
+CH4 是输入捕获(IC)模式：PI2 一来边沿，硬件立刻把此刻的 CNT 值锁进 CCR4，同时置位 CC4 中断标志，CPU 只在中断里去读这个已经锁存好的值（TIM_GetCapture4(TIM8)，TACH2_get() 干的事）。
+这两种模式的配置分别落在 CCMR1/CCMR2 寄存器的不同 bit 段（CH2 用 CCMR1 高字节，CH3/CH4 用 CCMR2 高低字节），互不冲突，所以 TIM_OC3Init/TIM_OC2Init（PWM 输出）和 TIM_ICInit（CH4 输入捕获）可以分别调用、互不覆盖。真正共享、必须"打架"的只有 CNT/ARR/PSC 这套公共时基。
+
+
+
+代码层面：先配捕获，后配 PWM，靠调用顺序定生死
+这就是为什么 PWM_Configuration() 里的顺序有讲究（bsp_pwm.c:438-449）：
+
+pwm_input_Config(INPUT2_CHANNEL) 先跑（bsp_pwm.c:219-269）：对 TIM8 调 TIM_TimeBaseInit，把 ARR 设成 INPUT_CNT-1=999（这是给"正常"输入捕获用的大周期，跟 TIM4/TIM5 一致），然后配 CH4 为输入捕获、使能 CC4+Update 中断、TIM_Cmd(TIM8, ENABLE) 启动计数。
+pwm_gpio_config() + pwm_output_Config() 后跑（bsp_pwm.c:72-114）：对 TIM8 再调一次 TIM_TimeBaseInit，这次把 ARR 改写成 OUTPUT_CNT-1=199，覆盖掉第一次设的 999；接着 TIM_OC3Init/TIM_OC2Init 配 CH3/CH2 为 PWM 输出。
+TIM_TimeBaseInit 只动 CR1/ARR/PSC/RCR，不碰 CCMR/CCER，所以第 2 步不会破坏第 1 步里已经配好的 CH4 捕获模式——捕获功能保留了，但它依附的计数周期从 999(1ms) 被迫改成了 199(50µs)。这正是 bsp_pwm.c:446 那条注释"PWM输出必须后初始化,确保TIM8的period=OUTPUT_CNT-1不被输入捕获覆盖"想保证的事——如果顺序反了，TIM8 的 ARR 会停留在 999，PWM 周期就变成 1ms（1kHz），跟设计的 20kHz 完全不对。
+
+因为 ARR 变小了，PWM_Configuration() 末尾（bsp_pwm.c:455-456）用软件把 TACH2 的 timer_period 硬改成 200（而不是 1000）、timer_tick_us 改成 4（而不是 1），去补偿这个被 PWM 抢走的时基——这样 calculate_fan_rpm() 重建周期时用的除数才是对的。
+一句话总结
+TIM8 的 4 个通道各自独立决定"这个引脚是输出还是捕获"，但它们读的是同一把尺子（CNT 按同一 ARR/PSC 循环）。PWM 想要 20kHz，就得把这把尺子的刻度做到 50µs 一圈；TACH2 捕获跟着用这把尺子，量程和刷新频率也就被迫变成 50µs 一圈，这就是上一轮说的"20 倍中断负载"的直接机制来源。
+
+通道各自的 CCMR/CCER 字段互不重叠，但都读同一个 CNT/ARR/PSC——这正好呼应上一轮讲的：模式配置(CCMR/CCER)是每通道独立的，时基(CNT/ARR/PSC)是全定时器共享的，TIM8 能"PWM+捕获一心二用"靠的就是前者独立、代价是后者共享。
+
+
+=====================================================================
+附：从机地址 0x30 的 IPMB 测试指令（PEM 状态轮询）
+=====================================================================
+# 可直接复制到主机串口；校验已按 rsSA=0x30 计算。
+# 用于读取 PEM 当前状态（阈值是否超限、sys_state、cause）。
+ipmb 30 10 C0 20 00 02 DE
+
+# 字段：rsSA=30, netFn/LUN=10, 头校验=C0, rqSA=20, rqSeq=00,
+#       cmd=02（Platform Event Message），尾校验=DE。
+# 若从机当前为“阈值超限”，预期会看到类似：
+# [PEM-PUSH-A/B] slave=0x30 threshold_exceeded=1 sys_state=M1 cause=1
+
