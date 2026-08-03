@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IPMB 网页控制台</title>
+<style>
+  :root {
+    --bg: #f4f5f7;
+    --panel: #ffffff;
+    --border: #e2e4e9;
+    --text: #1c1f26;
+    --text-dim: #6b7280;
+    --accent: #2f6fed;
+    --accent-dim: #dbe6fd;
+    --ok: #1a9e5c;
+    --ok-bg: #e4f7ee;
+    --warn: #b7791f;
+    --warn-bg: #fdf3e0;
+    --danger: #d1373f;
+    --danger-bg: #fbe6e7;
+    --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 20px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    flex-wrap: wrap;
+  }
+  header h1 {
+    font-size: 16px;
+    margin: 0;
+    white-space: nowrap;
+  }
+  header .field {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+  header input[type=text] {
+    font-family: var(--mono);
+    font-size: 13px;
+    padding: 5px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    width: 160px;
+  }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .badge.ok { background: var(--ok-bg); color: var(--ok); }
+  .badge.bad { background: var(--danger-bg); color: var(--danger); }
+  .badge .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  header .spacer { flex: 1; }
+  header .meta { font-size: 12px; color: var(--text-dim); font-family: var(--mono); }
+
+  .layout {
+    display: flex;
+    min-height: calc(100vh - 53px);
+  }
+  aside {
+    width: 240px;
+    flex-shrink: 0;
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    padding: 14px;
+    overflow-y: auto;
+  }
+  aside h2 {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: var(--text-dim);
+    margin: 0 0 10px;
+  }
+  .slot-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    margin-bottom: 4px;
+    border: 1px solid transparent;
+  }
+  .slot-item:hover { background: var(--bg); }
+  .slot-item.active { background: var(--accent-dim); border-color: var(--accent); }
+  .slot-item .slot-name { font-weight: 600; font-size: 14px; }
+  .slot-item .slot-addr { font-size: 11px; color: var(--text-dim); font-family: var(--mono); }
+  .slot-empty { color: var(--text-dim); font-size: 13px; padding: 10px 4px; }
+
+  main {
+    flex: 1;
+    padding: 20px;
+    overflow-y: auto;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 14px;
+    margin-bottom: 16px;
+  }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+  }
+  .card h3 {
+    margin: 0 0 12px;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: .03em;
+    color: var(--text-dim);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 13px; }
+  .kv dt { color: var(--text-dim); }
+  .kv dd { margin: 0; font-family: var(--mono); text-align: right; }
+  .note {
+    margin-top: 10px;
+    font-size: 12px;
+    color: var(--warn);
+    background: var(--warn-bg);
+    padding: 8px 10px;
+    border-radius: 6px;
+    line-height: 1.5;
+  }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 6px; border-bottom: 1px solid var(--border); }
+  th { color: var(--text-dim); font-weight: 600; font-size: 11px; text-transform: uppercase; }
+  tr.stale td { color: var(--text-dim); font-style: italic; }
+  .value-cell { font-family: var(--mono); }
+
+  .btn {
+    font-size: 13px;
+    padding: 8px 14px;
+    border-radius: 7px;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    cursor: pointer;
+    font-weight: 600;
+  }
+  .btn:hover { background: var(--bg); }
+  .btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .btn.primary:hover { filter: brightness(1.08); }
+  .btn.danger { background: #fff; color: var(--danger); border-color: var(--danger); }
+  .btn.danger:hover { background: var(--danger-bg); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  .btn-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 4px; }
+
+  details.advanced { margin-top: 14px; }
+  details.advanced summary {
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--accent);
+    font-weight: 600;
+    user-select: none;
+  }
+  .adv-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 0;
+    border-bottom: 1px dashed var(--border);
+    flex-wrap: wrap;
+  }
+  .adv-row:last-child { border-bottom: none; }
+  .adv-row .adv-label { font-size: 13px; flex: 1; min-width: 160px; }
+  .adv-row input[type=number] {
+    width: 90px;
+    padding: 5px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-family: var(--mono);
+    font-size: 13px;
+  }
+
+  .ticket-log { font-size: 12px; font-family: var(--mono); max-height: 220px; overflow-y: auto; }
+  .ticket-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .ticket-row:last-child { border-bottom: none; }
+  .ticket-status { font-weight: 700; }
+  .ticket-status.pending { color: var(--warn); }
+  .ticket-status.done { color: var(--ok); }
+  .ticket-status.timeout, .ticket-status.error { color: var(--danger); }
+
+  .empty-state {
+    text-align: center;
+    color: var(--text-dim);
+    padding: 60px 20px;
+    font-size: 14px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14161a;
+      --panel: #1c1f26;
+      --border: #2c313b;
+      --text: #e7e9ee;
+      --text-dim: #8b93a1;
+      --accent: #5b8cf5;
+      --accent-dim: #22314f;
+      --ok: #3ecf8e;
+      --ok-bg: #123425;
+      --warn: #e0ac4f;
+      --warn-bg: #3a2c12;
+      --danger: #f27272;
+      --danger-bg: #3a1a1c;
+    }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>IPMB 网页控制台</h1>
+  <div class="field">
+    <span>板子地址</span>
+    <input type="text" id="baseUrlInput" placeholder="192.168.100.20">
+  </div>
+  <span id="connBadge" class="badge bad"><span class="dot"></span>离线</span>
+  <div class="spacer"></div>
+  <span id="healthMeta" class="meta"></span>
+</header>
+
+<div class="layout">
+  <aside>
+    <h2>已发现槽位</h2>
+    <div id="slotList"><div class="slot-empty">连接中...</div></div>
+  </aside>
+
+  <main id="mainPanel">
+    <div class="empty-state">左侧选择一个槽位查看详情</div>
+  </main>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var CTRL_ACTIONS = [
+    { key: 'power_on', label: '开机', danger: false },
+    { key: 'power_off', label: '关机', danger: true },
+    { key: 'reset', label: '复位', danger: true },
+    { key: 'soft_shutdown', label: '软关机', danger: true },
+    { key: 'soft_reset', label: '软复位', danger: true }
+  ];
+  var ADV_ACTIONS = [
+    { key: 'set_threshold_exceeded', label: '设置阈值超限', needValue: false },
+    { key: 'set_threshold_normal', label: '设置阈值正常', needValue: false },
+    { key: 'set_fan_default_level', label: '设置风扇默认档位', needValue: true, valueHint: '0-100' },
+    { key: 'set_fan_max_rpm', label: '设置风扇最大转速', needValue: true, valueHint: 'RPM' },
+    { key: 'set_ipmc_version', label: '设置IPMC版本(BCD)', needValue: true, valueHint: '如 0x21=2.1', hex: true },
+    { key: 'set_i2c_speed_100k', label: 'I2C速率 100Kbps(全总线)', needValue: false },
+    { key: 'set_i2c_speed_400k', label: 'I2C速率 400Kbps(全总线)', needValue: false }
+  ];
+
+  var state = {
+    baseUrl: '',
+    slots: [],
+    selectedSlot: null,
+    detail: null,
+    tickets: []   // {ticket, actionLabel, status, completion_code, note}
+  };
+
+  var els = {
+    baseUrlInput: document.getElementById('baseUrlInput'),
+    connBadge: document.getElementById('connBadge'),
+    healthMeta: document.getElementById('healthMeta'),
+    slotList: document.getElementById('slotList'),
+    mainPanel: document.getElementById('mainPanel')
+  };
+
+  function loadBaseUrl() {
+    var saved = localStorage.getItem('ipmb_console_ip') || '192.168.100.20';
+    els.baseUrlInput.value = saved;
+    state.baseUrl = 'http://' + saved;
+  }
+  els.baseUrlInput.addEventListener('change', function () {
+    var v = els.baseUrlInput.value.trim() || '192.168.100.20';
+    localStorage.setItem('ipmb_console_ip', v);
+    state.baseUrl = 'http://' + v;
+    refreshAll();
+  });
+
+  function apiGet(path) {
+    return fetch(state.baseUrl + path, { cache: 'no-store' }).then(function (r) {
+      if (!r.ok) return r.json().then(function (j) { throw j; });
+      return r.json();
+    });
+  }
+  function apiPost(path, body) {
+    return fetch(state.baseUrl + path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    }).then(function (r) {
+      return r.json().then(function (j) {
+        if (!r.ok) throw j;
+        return j;
+      });
+    });
+  }
+
+  function fmtAge(ms) {
+    if (ms == null) return '-';
+    if (ms < 1000) return ms + 'ms';
+    if (ms < 60000) return (ms / 1000).toFixed(1) + 's';
+    return Math.floor(ms / 60000) + 'min';
+  }
+
+  // ---------- health ----------
+  function refreshHealth() {
+    apiGet('/api/v1/health').then(function (h) {
+      els.connBadge.className = 'badge ok';
+      els.connBadge.innerHTML = '<span class="dot"></span>在线';
+      els.healthMeta.textContent =
+        'uptime ' + fmtAge(h.uptime_ms) +
+        '  |  free_heap ' + h.free_heap + 'B' +
+        '  |  bus ' + h.active_bus +
+        '  |  slots ' + h.slot_count +
+        '  |  I2C ' + (h.i2c_speed_hz / 1000) + 'Kbps';
+    }).catch(function () {
+      els.connBadge.className = 'badge bad';
+      els.connBadge.innerHTML = '<span class="dot"></span>离线';
+      els.healthMeta.textContent = '';
+    });
+  }
+
+  // ---------- slot list ----------
+  function refreshSlots() {
+    apiGet('/api/v1/slots').then(function (data) {
+      state.slots = data.slots || [];
+      renderSlotList();
+    }).catch(function () {
+      els.slotList.innerHTML = '<div class="slot-empty">无法连接板子</div>';
+    });
+  }
+
+  function renderSlotList() {
+    if (state.slots.length === 0) {
+      els.slotList.innerHTML = '<div class="slot-empty">尚未发现从机</div>';
+      return;
+    }
+    var html = '';
+    state.slots.forEach(function (s) {
+      var active = state.selectedSlot === s.slot_id ? ' active' : '';
+      html += '<div class="slot-item' + active + '" data-slot="' + s.slot_id + '">' +
+        '<div><div class="slot-name">槽位 ' + s.slot_id + '</div>' +
+        '<div class="slot-addr">' + s.addr + ' &middot; ' + fmtAge(s.last_seen_ms) + '前</div></div>' +
+        '<span class="badge ' + (s.online ? 'ok' : 'bad') + '"><span class="dot"></span>' + (s.online ? '在线' : '离线') + '</span>' +
+        '</div>';
+    });
+    els.slotList.innerHTML = html;
+    Array.prototype.forEach.call(els.slotList.querySelectorAll('.slot-item'), function (el) {
+      el.addEventListener('click', function () {
+        selectSlot(parseInt(el.getAttribute('data-slot'), 10));
+      });
+    });
+  }
+
+  function selectSlot(id) {
+    state.selectedSlot = id;
+    renderSlotList();
+    renderPanelSkeleton();   // 控制面板/高级面板/操作记录只在切换槽位时重建一次
+    refreshDetail();
+  }
+
+  // 面板骨架:数据区(每次轮询刷新) + 控制区(只在选槽位时建一次,避免自动刷新
+  // 打断用户正在填写的数值输入框、或把展开的"高级控制"收起来)
+  function renderPanelSkeleton() {
+    els.mainPanel.innerHTML =
+      '<div id="dataArea"><div class="empty-state">加载中...</div></div>' +
+      '<div class="card" style="margin-bottom:16px"><h3>控制</h3>' +
+      '<div class="btn-row">' +
+        CTRL_ACTIONS.map(function (a) {
+          return '<button class="btn ' + (a.danger ? 'danger' : 'primary') + '" data-action="' + a.key + '">' + a.label + '</button>';
+        }).join('') +
+      '</div>' +
+      '<details class="advanced"><summary>高级控制</summary>' +
+        ADV_ACTIONS.map(function (a) {
+          var input = a.needValue ? '<input type="' + (a.hex ? 'text' : 'number') + '" data-adv-value="' + a.key + '" placeholder="' + a.valueHint + '">' : '';
+          return '<div class="adv-row"><span class="adv-label">' + a.label + '</span>' + input +
+            '<button class="btn" data-action="' + a.key + '" data-need-value="' + (a.needValue ? '1' : '0') + '">执行</button></div>';
+        }).join('') +
+      '</details></div>' +
+      '<div class="card"><h3>最近操作</h3><div class="ticket-log" id="ticketLog"></div></div>';
+
+    Array.prototype.forEach.call(els.mainPanel.querySelectorAll('button[data-action]'), function (btn) {
+      btn.addEventListener('click', function () { onControlClick(btn); });
+    });
+    renderTicketLog();
+  }
+
+  // ---------- slot detail ----------
+  function refreshDetail() {
+    if (state.selectedSlot === null) return;
+    apiGet('/api/v1/slots/' + state.selectedSlot).then(function (d) {
+      state.detail = d;
+      renderDetail();
+    }).catch(function () {
+      state.detail = null;
+      var area = document.getElementById('dataArea');
+      if (area) area.innerHTML = '<div class="empty-state">槽位 ' + state.selectedSlot + ' 暂时无法访问</div>';
+    });
+  }
+
+  function renderDetail() {
+    var d = state.detail;
+    if (!d) return;
+    var area = document.getElementById('dataArea');
+    if (!area) return;   // 用户已经切到别的槽位/离开页面,这次响应就丢弃
+    var dev = d.device_id, bs = d.board_status, sr = d.slot_readback, pem = d.pem;
+
+    var html = '<div class="grid">';
+
+    // Device ID card
+    html += '<div class="card"><h3>Device ID' + validBadge(dev.valid) + '</h3><dl class="kv">' +
+      kv('Device ID', dev.device_id) +
+      kv('硬件版本', dev.hw_revision) +
+      kv('固件大版本', dev.fw_major_rev) +
+      kv('IPMC软件版本', dev.ipmc_sw_version) +
+      kv('IPMI版本', dev.ipmi_version) +
+      kv('设备支持', dev.device_support) +
+      kv('厂家ID', dev.mfg_id) +
+      kv('产品ID', dev.product_id) +
+      '</dl></div>';
+
+    // Board status card
+    html += '<div class="card"><h3>Board Status' + validBadge(bs.valid) + '</h3><dl class="kv">' +
+      kv('CPU在位', bs.cpu_present) +
+      kv('自检结果', bs.self_test) +
+      kv('CPU利用率', bs.cpu_util) +
+      kv('内存利用率', bs.mem_util) +
+      kv('带宽1', bs.bw1) +
+      kv('带宽2', bs.bw2) +
+      kv('CPU温度(C)', bs.cpu_temp_c) +
+      kv('OS版本', bs.os_version) +
+      kv('固件版本', bs.fw_version) +
+      '</dl><div class="note">' + escapeHtml(bs.note || '') + '</div></div>';
+
+    // Slot readback + PEM card
+    html += '<div class="card"><h3>槽位回读' + validBadge(sr.valid) + '</h3><dl class="kv">' +
+      kv('槽位号', sr.slot_id) +
+      '</dl></div>';
+
+    html += '<div class="card"><h3>PEM 事件' + validBadge(pem.valid) + '</h3><dl class="kv">' +
+      kv('阈值超限', pem.threshold_exceeded) +
+      kv('系统状态', 'M' + pem.sys_state) +
+      kv('原因码', pem.cause) +
+      kv('距今', fmtAge(pem.age_ms)) +
+      '</dl><div class="note">' + escapeHtml(pem.note || '') + '</div></div>';
+
+    html += '</div>'; // grid
+
+    // sensors table
+    html += '<div class="card" style="margin-bottom:16px"><h3>传感器</h3><table><thead><tr>' +
+      '<th>名称</th><th>编号</th><th>数值</th><th>单位</th><th>状态</th></tr></thead><tbody>';
+    (d.sensors || []).forEach(function (s) {
+      html += '<tr class="' + (s.valid ? '' : 'stale') + '">' +
+        '<td>' + escapeHtml(s.name) + '</td>' +
+        '<td class="value-cell">0x' + s.sensor_num.toString(16).toUpperCase() + '</td>' +
+        '<td class="value-cell">' + s.value + '</td>' +
+        '<td>' + escapeHtml(s.unit) + '</td>' +
+        '<td>' + (s.valid ? '实时' : '未刷新') + '</td>' +
+        '</tr>';
+    });
+    html += '</tbody></table></div>';
+
+    area.innerHTML = html;
+  }
+
+  function kv(label, value) {
+    return '<dt>' + escapeHtml(label) + '</dt><dd>' + escapeHtml(String(value)) + '</dd>';
+  }
+  function validBadge(valid) {
+    return valid ? '' : ' <span class="badge bad" style="font-size:10px;padding:2px 8px">未刷新</span>';
+  }
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  // ---------- control submit ----------
+  function onControlClick(btn) {
+    var action = btn.getAttribute('data-action');
+    var needValue = btn.getAttribute('data-need-value') === '1';
+    var actionMeta = CTRL_ACTIONS.concat(ADV_ACTIONS).filter(function (a) { return a.key === action; })[0];
+    var label = actionMeta ? actionMeta.label : action;
+
+    var value = null;
+    if (needValue) {
+      var input = els.mainPanel.querySelector('input[data-adv-value="' + action + '"]');
+      var raw = input ? input.value.trim() : '';
+      if (raw === '') { alert('请先填写数值'); return; }
+      value = (actionMeta && actionMeta.hex)
+        ? parseInt(raw.replace(/^0[xX]/, ''), 16)
+        : parseInt(raw, 10);
+      if (isNaN(value)) { alert('数值格式不对'); return; }
+    }
+
+    if (actionMeta && actionMeta.danger) {
+      if (!confirm('确认要对槽位 ' + state.selectedSlot + ' 执行【' + label + '】吗？这是真实的物理操作，无法撤销。')) return;
+    }
+
+    var body = { action: action };
+    if (value !== null) body.value = value;
+
+    btn.disabled = true;
+    apiPost('/api/v1/slots/' + state.selectedSlot + '/control', body).then(function (resp) {
+      btn.disabled = false;
+      addTicket(resp.ticket, '槽位' + state.selectedSlot + ' ' + label, resp.note);
+      pollTicket(resp.ticket);
+    }).catch(function (err) {
+      btn.disabled = false;
+      alert('提交失败: ' + (err && err.error ? err.error : JSON.stringify(err)));
+    });
+  }
+
+  function addTicket(ticket, label, note) {
+    state.tickets.unshift({ ticket: ticket, label: label, status: 'pending', note: note || '' });
+    if (state.tickets.length > 12) state.tickets.length = 12;
+    renderTicketLog();
+  }
+
+  function renderTicketLog() {
+    var box = document.getElementById('ticketLog');
+    if (!box) return;
+    if (state.tickets.length === 0) {
+      box.innerHTML = '<div style="color:var(--text-dim)">暂无操作记录</div>';
+      return;
+    }
+    var html = '';
+    state.tickets.forEach(function (t) {
+      html += '<div class="ticket-row"><span>#' + t.ticket + ' ' + escapeHtml(t.label) +
+        (t.note ? ' <span style="color:var(--warn)">(' + escapeHtml(t.note) + ')</span>' : '') + '</span>' +
+        '<span class="ticket-status ' + t.status + '">' + statusText(t.status) +
+        (t.completion_code !== undefined ? ' cc=0x' + t.completion_code.toString(16) : '') + '</span></div>';
+    });
+    box.innerHTML = html;
+  }
+  function statusText(s) {
+    return { pending: '处理中...', done: '完成', timeout: '超时', error: '失败' }[s] || s;
+  }
+
+  function pollTicket(ticket) {
+    var tries = 0;
+    var timer = setInterval(function () {
+      tries++;
+      apiGet('/api/v1/tickets/' + ticket).then(function (r) {
+        var t = state.tickets.filter(function (x) { return x.ticket === ticket; })[0];
+        if (t) {
+          t.status = r.status;
+          t.completion_code = r.completion_code;
+          renderTicketLog();
+        }
+        if (r.status !== 'pending' || tries > 40) clearInterval(timer);
+      }).catch(function () { clearInterval(timer); });
+    }, 500);
+  }
+
+  // ---------- main refresh loop ----------
+  function refreshAll() {
+    refreshHealth();
+    refreshSlots();
+    if (state.selectedSlot !== null) refreshDetail();
+  }
+
+  loadBaseUrl();
+  refreshAll();
+  setInterval(refreshAll, 3000);
+})();
+</script>
+</body>
+</html>
