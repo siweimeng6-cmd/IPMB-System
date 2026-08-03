@@ -2,7 +2,7 @@
 
 IPMB 1.0 规范通信主机（Master）固件工程，基于 STM32F407。请求与应答均由各自发起方主动 `write`，非轮询模式。
 
-从机地址识别算法：从机读取背板 GA0~GA4 共 5 个地址引脚（低电平有效，读入后按位取反）得到槽位号 Slot_ID（0~31），按 `I2C 地址 = 0x30 + (Slot_ID << 1)` 计算出自己的 IPMB 地址（不再固定为 0x8E）。主机侧不直接读取从机 GPIO，而是由 `IPMB_Discovery_Task`（[`User/I2C/task_i2c.c`](User/I2C/task_i2c.c)）每 15s 在 IPMB-A/B 双总线上后台扫描 0x30~0x6E 全部候选地址（逐一发送 Get Device ID 探测），根据实际应答动态建立在线从机地址表 `g_slave_addrs[]`，并通过 Get Slot（cmd 0x15）二次核实从机上报的槽位号。
+从机地址识别算法：从机读取背板 GA0\~GA4 共 5 个地址引脚（低电平有效，读入后按位取反）得到槽位号 Slot_ID（0\~31），按 `I2C 地址 = 0x30 + (Slot_ID << 1)` 计算出自己的 IPMB 地址（不再固定为 0x8E）。主机侧不直接读取从机 GPIO，而是由 `IPMB_Discovery_Task`（[`User/I2C/task_i2c.c`](User/I2C/task_i2c.c)）每 15s 在 IPMB-A/B 双总线上后台扫描 0x30\~0x6E 全部候选地址（逐一发送 Get Device ID 探测），根据实际应答动态建立在线从机地址表 `g_slave_addrs[]`，并通过 Get Slot（cmd 0x15）二次核实从机上报的槽位号。
 
 ## 关键宏定义
 
