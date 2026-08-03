@@ -445,11 +445,6 @@
               <FilePath>..\..\User\I2C\bsp_temp.c</FilePath>
             </File>
             <File>
-              <FileName>必读说明.txt</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\..\必读说明.txt</FilePath>
-            </File>
-            <File>
               <FileName>func_pwm.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\User\PWM\func_pwm.c</FilePath>
@@ -986,13 +981,6 @@
         </Group>
         <Group>
           <GroupName>DOC</GroupName>
-          <Files>
-            <File>
-              <FileName>必读说明.txt</FileName>
-              <FileType>5</FileType>
-              <FilePath>..\..\必读说明.txt</FilePath>
-            </File>
-          </Files>
         </Group>
         <Group>
           <GroupName>LWIP_CORE</GroupName>

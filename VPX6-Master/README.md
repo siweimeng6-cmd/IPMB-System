@@ -2,12 +2,15 @@
 
 IPMB 1.0 规范通信主机（Master）固件工程，基于 STM32F407。请求与应答均由各自发起方主动 `write`，非轮询模式。
 
+从机地址识别算法：从机读取背板 GA0~GA4 共 5 个地址引脚（低电平有效，读入后按位取反）得到槽位号 Slot_ID（0~31），按 `I2C 地址 = 0x30 + (Slot_ID << 1)` 计算出自己的 IPMB 地址（不再固定为 0x8E）。主机侧不直接读取从机 GPIO，而是由 `IPMB_Discovery_Task`（[`User/I2C/task_i2c.c`](User/I2C/task_i2c.c)）每 15s 在 IPMB-A/B 双总线上后台扫描 0x30~0x6E 全部候选地址（逐一发送 Get Device ID 探测），根据实际应答动态建立在线从机地址表 `g_slave_addrs[]`，并通过 Get Slot（cmd 0x15）二次核实从机上报的槽位号。
+
 ## 关键宏定义
 
 | 宏 | 位置 | 说明 |
 |---|---|---|
 | `IPMB_PEM_AUTO_POLL_ENABLE` | [`User/I2C/task_i2c.h`](User/I2C/task_i2c.h) | PEM（Platform Event Message）自动轮询上报总开关。`1` = 每 5s 自动轮询并打印（默认）；`0` = 关闭自动轮询，串口不再周期性刷 PEM 上报，但不影响手动 `ipmb 3x ... 02` 查询。 |
 | `BOARD_USE_LY1210A` | [`User/ethernet/bsp_ethernet.h`](User/ethernet/bsp_ethernet.h) | 以太网 PHY 芯片选型总开关。`1` = 量产板 LY1210A-IR-QFN32（MII）；`0` = 测试板 LAN8720A-CP-TR-ABC（RMII，默认）。 |
+| `Ipmb_SlotToAddr(slot)` / `Ipmb_AddrToSlot(addr)` | [`User/I2C/task_i2c.h`](User/I2C/task_i2c.h) | 从机 IPMB 地址与背板槽位号互换宏：`addr = 0x30 + (slot << 1)`，slot 范围 0~31。 |
 
 ## 修改记录
 
