@@ -1,0 +1,71 @@
+» 8E 18 00 20 00 01
+« [UART4] raw[18]="8E 18 00 20 00 01
+" hex=38 45 20 31 38 20 30 30 20 32 30 20 30 30 20 30 31 0D 
+[UART4] parse: ok=1 tlen=6
+[UART4] IPMB frame queued, len=8
+[IPMB-A Master] Send req to slave 0x8E (cmd=0x01, expect_resp=20B)
+[IPMB-A Master] TX 8B: 8E 18 5A 20 00 01 00 DF
+[IPMB-A Master] I2C1 SR1=0x0040 SR2=0x0000
+[IPMB-B] RX cmd=0x01 rqSeq=0 len=8
+[IPMB-B] TX resp 20 bytes
+[IPMB-A Master] Slave ready, resp len=20
+[IPMB-A Master] RX 20B: 20 18 C8 8E 00 01 00 8E 81 81 21 51 23 00 00 00 01 00 00 4B
+[IPMB-A Master] CC=0x00
+[IPMB-A Master]   DeviceID=0x8E Rev=0x81 FW1=0x81 FW2=0x21
+[IPMB-A Master]   IPMI_Ver=0x51 Support=0x23 Manuf=0x000000 Product=0x0001
+[IPMB-A Master] waiting for UART4 request... (cnt=0) 
+解释：
+
+阶段 1：UART4 接收 IPMB 帧
+» 8E 18 00 20 00 01         ← 用户通过串口发送的 hex 裸帧
+« [UART4] raw[18]=...        ← UART4 收到原始 ASCII 文本 18 字节
+   hex=38 45 20 31 38 ...    ← ASCII 转 hex 视图（'8'=0x38, 'E'=0x45, ' '=0x20...）
+   parse: ok=1 tlen=6         ← 解析成功，6 字节数据
+   IPMB frame queued, len=8   ← 加上 2 字节校验和 = 8 字节帧
+
+阶段 2：I2C1 主机发送
+[IPMB-A Master] Send req to slave 0x8E (cmd=0x01, expect_resp=20B)
+                              ← 主机准备向从机 0x8E 发 Get Device ID(cmd=0x01)
+                              ← 期望响应 20 字节
+  TX 8B: 8E 18 5A 20 00 01 00 DF
+                              ← 实际 I2C 总线发送的 8 字节 IPMB 帧:
+                                [0] 8E = rsSA (接收方地址 = 从机 0x8E)
+                                [1] 18 = netFn(0x06)<<2 | LUN = App(0x06) 请求
+                                [2] 5A = 校验和1 (覆盖[0..1])
+                                [3] 20 = rqSA (发送方地址 = 主机 0x20，即 0x40>>1)
+                                [4] 00 = rqSeq(0)<<2 | rqLUN(0)
+                                [5] 01 = cmd = Get Device ID
+                                [6] 00 = data (占位，Get Device ID 无需参数)
+                                [7] DF = 校验和2 (覆盖[3..6])
+  I2C1 SR1=0x0040 SR2=0x0000   ← I2C1 硬件状态: RXNE=1(收到了数据), BUSY=0 ✅
+
+阶段 3：I2C2 从机处理
+[IPMB-B] RX cmd=0x01 rqSeq=0 len=8
+                              ← I2C2 从机收到 8 字节帧，命令=0x01
+[IPMB-B] TX resp 20 bytes     ← 从机协议栈准备好 20 字节响应，写入 tx_buffer
+
+阶段 4：I2C1 主机接收响应
+[IPMB-A Master] Slave ready, resp len=20
+                              ← 主机轮询到从机 tx_len=20，从机已准备好
+  RX 20B: 20 18 C8 8E 00 01 00 8E 81 81 21 51 23 00 00 00 01 00 00 4B
+                              ← I2C 读回的 20 字节响应帧:
+                                [0] 20 = rqSA (响应方 = 0x20)
+                                [1] 18 = netFn(0x06)<<2 | LUN = App(0x06) 响应
+                                [2] C8 = 校验和1
+                                [3] 8E = rsSA (请求方 = 0x8E)
+                                [4] 00 = rqSeq(0)<<2 | rqLUN(0)
+                                [5] 01 = cmd = Get Device ID (原样返回)
+                                [6] 00 = CC = 0x00 (Command Completed OK ✅)
+                                [7] 8E = Device ID
+                                [8] 81 = Device Revision (1.01 = 0x81 的 BCD)
+                                [9] 81 = 固件版本 Major (IPMI 1.5)
+                                [10]21 = 固件版本 Minor (0x21)
+                                [11]51 = IPMI 版本 (1.5 = 0x51)
+                                [12]23 = 支持的扩展 (0x23: SDR+SEL+FRU+IPMB Event)
+                                [13-15] 00 00 00 = Manufacturer ID = 0 (测试 Lattice)
+                                [16-17] 01 00 = Product ID = 0x0001 (小端)
+                                [18]00 = Aux firmware rev
+                                [19]4B = 校验和2
+  CC=0x00                      ← 状态码=成功 ✅
+  DeviceID=0x8E Rev=0x81 FW1=0x81 FW2=0x21
+  IPMI_Ver=0x51 Support=0x23 Manuf=0x000000 Product=0x0001
