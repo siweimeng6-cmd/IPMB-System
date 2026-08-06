@@ -1,0 +1,59 @@
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;                      BMC Firmware History File                    ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+                            ***** BMC Fireware*****
+;============================================================================;
+Chipset : 
+Customer: HKT
+
+;++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++;
+PCB Ver: 01							Build date: 2026/07/30		Author: Evan Cai
+Main GD32 Firmware: H5K16M32004.bin				ChkSum: 06482F88
+烧录器升级GD32 Firmware: H5K16M32004ALL.bin			ChkSum: 06A20066
+
+Note：
+使用在线升级工具升级image请使用:H5K16M32004.bin
+使用烧录器烧录image请使用:H5K16M32004ALL.bin
+
+Descriptioin for FAE:
+	1. 调整led功能
+
+;++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++;
+PCB Ver: 01							Build date: 2026/07/27		Author: Evan Cai
+Main GD32 Firmware: H5K16M32003.bin				ChkSum: 06484B45
+烧录器升级GD32 Firmware: H5K16M32003ALL.bin			ChkSum: 06A21C23
+
+Note：
+使用在线升级工具升级image请使用:H5K16M32003.bin
+使用烧录器烧录image请使用:H5K16M32003ALL.bin
+
+Descriptioin for FAE:
+	1. 添加读取温度功能
+
+;++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++;
+PCB Ver: 01							Build date: 2026/07/24		Author: Evan Cai
+Main GD32 Firmware: H5K16M32002.bin				ChkSum: 0647760C
+烧录器升级GD32 Firmware: H5K16M32002ALL.bin			ChkSum: 06A146EA
+
+Note：
+使用在线升级工具升级image请使用:H5K16M32002.bin
+使用烧录器烧录image请使用:H5K16M32002ALL.bin
+
+Descriptioin for FAE:
+	1. 添加配置power mode cmd
+
+
+;++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++;
+PCB Ver: 01							Build date: 2026/07/22		Author: Evan Cai
+Main GD32 Firmware: H5K16M32001.bin				ChkSum: 0647D962
+烧录器升级GD32 Firmware: H5K16M32001ALL.bin			ChkSum: 06A1AA40
+
+Note：
+使用在线升级工具升级image请使用:H5K16M32001.bin
+使用烧录器烧录image请使用:H5K16M32001ALL.bin
+
+Descriptioin for FAE:
+	1. power on
+
+

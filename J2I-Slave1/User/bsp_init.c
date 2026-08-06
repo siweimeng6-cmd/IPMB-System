@@ -1,5 +1,6 @@
 #include "bsp_init.h"
 #include "FreeRTOS.h"
+#include ".\i2c\bsp_eeprom.h"
 
 
 TaskHandle_t Sensor_Task_Handle = NULL;
@@ -75,6 +76,7 @@ void BSP_Init(void)
 	
 	#if MO_IIC
 	Init_MO_I2C();
+	EEPROM_SelfTest();
 	#else
 	Init_HARD_I2C();
 	#endif

@@ -49,7 +49,7 @@
             <InvalidFlash>1</InvalidFlash>
           </TargetStatus>
           <OutputDirectory>..\..\Output\</OutputDirectory>
-          <OutputName>HKV-6UD2K-J2I-BMC-0721</OutputName>
+          <OutputName>HKV-6UD2K-J2I-BMC-0805</OutputName>
           <CreateExecutable>1</CreateExecutable>
           <CreateLib>0</CreateLib>
           <CreateHexFile>1</CreateHexFile>
@@ -643,6 +643,11 @@
               <FileName>task_fan.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\..\User\timer\task_fan.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_eeprom.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\User\i2c\bsp_eeprom.c</FilePath>
             </File>
           </Files>
         </Group>
