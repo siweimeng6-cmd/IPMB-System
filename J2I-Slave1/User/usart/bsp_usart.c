@@ -8,17 +8,17 @@ static uint32_t USARTx_RX_PIN[COMn] 	 			= { DEBUG_USART_RX_GPIO_PIN , 	COM_USAR
 static GPIO_TypeDef* USARTx_TX_PORT[COMn]   = { DEBUG_USART_TX_GPIO_PORT ,  COM_USART5_TX_GPIO_PORT	};
 static uint32_t USARTx_TX_PIN[COMn] 	 			= { DEBUG_USART_TX_GPIO_PIN , 	COM_USART5_TX_GPIO_PIN  };
 
-stUSART_RECV_DATA_t   stUart4_recv_Data;
-stUSART_RECV_DATA_t   stUart5_recv_Data;
+stUSART_RECV_DATA_t    stUart4_recv_Data;
+stUSART5_RECV_DATA_t   stUart5_recv_Data;
 
 
 
 /*																						
 *********************************************************************************************************
-*	º¯ Êý Ãû: USART_Config
-*	¹¦ÄÜËµÃ÷: 
-*	ÐÎ    ²Î£ºUSART_TypeDef * usartx ,uint32_t USARTx_Baudrate
-*	·µ »Ø Öµ: ÎÞ
+*	ï¿½ï¿½ ï¿½ï¿½ ï¿½ï¿½: USART_Config
+*	ï¿½ï¿½ï¿½ï¿½Ëµï¿½ï¿½: 
+*	ï¿½ï¿½    ï¿½Î£ï¿½USART_TypeDef * usartx ,uint32_t USARTx_Baudrate
+*	ï¿½ï¿½ ï¿½ï¿½ Öµ: ï¿½ï¿½
 *********************************************************************************************************
 */
 void USART_Config(USART_TypeDef * usartx ,uint32_t USARTx_Baudrate)
@@ -39,79 +39,79 @@ void USART_Config(USART_TypeDef * usartx ,uint32_t USARTx_Baudrate)
 	DEBUG_USART_GPIO_APBxClkCmd(USARTx_RX_GPIO_CLK[COM_ID], ENABLE);
 	DEBUG_USART_APBxClkCmd(USARTx_CLK[COM_ID], ENABLE);
 
-	// ½«USART TxµÄGPIOÅäÖÃÎªÍÆÍì¸´ÓÃÄ£Ê½
+	// ï¿½ï¿½USART Txï¿½ï¿½GPIOï¿½ï¿½ï¿½ï¿½Îªï¿½ï¿½ï¿½ì¸´ï¿½ï¿½Ä£Ê½
 	GPIO_InitStructure.GPIO_Pin = USARTx_TX_PIN[COM_ID];
 	GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AF_PP;
 	GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
 	GPIO_Init(USARTx_TX_PORT[COM_ID], &GPIO_InitStructure);
 
-  // ½«USART RxµÄGPIOÅäÖÃÎª¸¡¿ÕÊäÈëÄ£Ê½
+  // ï¿½ï¿½USART Rxï¿½ï¿½GPIOï¿½ï¿½ï¿½ï¿½Îªï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä£Ê½
 	GPIO_InitStructure.GPIO_Pin = USARTx_RX_PIN[COM_ID];
 	GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IN_FLOATING;
 	GPIO_Init(USARTx_RX_PORT[COM_ID], &GPIO_InitStructure);
 	
-	// ÅäÖÃ´®¿ÚµÄ¹¤×÷²ÎÊý
-	USART_InitStructure.USART_BaudRate = DEBUG_USART_BAUDRATE;	// ÅäÖÃ²¨ÌØÂÊ
-	USART_InitStructure.USART_WordLength = USART_WordLength_8b;	// ÅäÖÃ ÕëÊý¾Ý×Ö³¤
-	USART_InitStructure.USART_StopBits = USART_StopBits_1;	// ÅäÖÃÍ£Ö¹Î»
-	USART_InitStructure.USART_Parity = USART_Parity_No ;	// ÅäÖÃÐ£ÑéÎ»
-	USART_InitStructure.USART_HardwareFlowControl = USART_HardwareFlowControl_None;	// ÅäÖÃÓ²¼þÁ÷¿ØÖÆ
-	USART_InitStructure.USART_Mode = USART_Mode_Rx | USART_Mode_Tx;	// ÅäÖÃ¹¤×÷Ä£Ê½£¬ÊÕ·¢Ò»Æð
-	USART_Init(usartx, &USART_InitStructure);		// Íê³É´®¿ÚµÄ³õÊ¼»¯ÅäÖÃ
+	// ï¿½ï¿½ï¿½Ã´ï¿½ï¿½ÚµÄ¹ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+	USART_InitStructure.USART_BaudRate = DEBUG_USART_BAUDRATE;	// ï¿½ï¿½ï¿½Ã²ï¿½ï¿½ï¿½ï¿½ï¿½
+	USART_InitStructure.USART_WordLength = USART_WordLength_8b;	// ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö³ï¿½
+	USART_InitStructure.USART_StopBits = USART_StopBits_1;	// ï¿½ï¿½ï¿½ï¿½Í£Ö¹Î»
+	USART_InitStructure.USART_Parity = USART_Parity_No ;	// ï¿½ï¿½ï¿½ï¿½Ð£ï¿½ï¿½Î»
+	USART_InitStructure.USART_HardwareFlowControl = USART_HardwareFlowControl_None;	// ï¿½ï¿½ï¿½ï¿½Ó²ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+	USART_InitStructure.USART_Mode = USART_Mode_Rx | USART_Mode_Tx;	// ï¿½ï¿½ï¿½Ã¹ï¿½ï¿½ï¿½Ä£Ê½ï¿½ï¿½ï¿½Õ·ï¿½Ò»ï¿½ï¿½
+	USART_Init(usartx, &USART_InitStructure);		// ï¿½ï¿½É´ï¿½ï¿½ÚµÄ³ï¿½Ê¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 	
-		// Ê¹ÄÜ´®¿Ú½ÓÊÕÖÐ¶Ï
+		// Ê¹ï¿½Ü´ï¿½ï¿½Ú½ï¿½ï¿½ï¿½ï¿½Ð¶ï¿½
 	USART_ITConfig(usartx, USART_IT_RXNE, ENABLE);	
-	USART_ITConfig ( usartx, USART_IT_IDLE, ENABLE ); //Ê¹ÄÜ´®¿Ú×ÜÏß¿ÕÏÐÖÐ¶Ï 	
+	USART_ITConfig ( usartx, USART_IT_IDLE, ENABLE ); //Ê¹ï¿½Ü´ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ß¿ï¿½ï¿½ï¿½ï¿½Ð¶ï¿½ 	
 	
-	USART_Cmd(usartx, ENABLE);	 	// Ê¹ÄÜ´®¿Ú   
+	USART_Cmd(usartx, ENABLE);	 	// Ê¹ï¿½Ü´ï¿½ï¿½ï¿½   
 }
 
 /*																						
 *********************************************************************************************************
-*	º¯ Êý Ãû: Usart_SendByte
-*	¹¦ÄÜËµÃ÷: ·¢ËÍÒ»¸ö×Ö½Ú
-*	ÐÎ    ²Î£ºUSART_TypeDef * pUSARTx, uint8_t ch
-*	·µ »Ø Öµ: ÎÞ
+*	ï¿½ï¿½ ï¿½ï¿½ ï¿½ï¿½: Usart_SendByte
+*	ï¿½ï¿½ï¿½ï¿½Ëµï¿½ï¿½: ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½ï¿½Ö½ï¿½
+*	ï¿½ï¿½    ï¿½Î£ï¿½USART_TypeDef * pUSARTx, uint8_t ch
+*	ï¿½ï¿½ ï¿½ï¿½ Öµ: ï¿½ï¿½
 *********************************************************************************************************
 */
 void Usart_SendByte( USART_TypeDef * pUSARTx, uint8_t ch)
 {
-	/* ·¢ËÍÒ»¸ö×Ö½ÚÊý¾Ýµ½USART */
+	/* ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½ï¿½Ö½ï¿½ï¿½ï¿½ï¿½Ýµï¿½USART */
 	USART_SendData(pUSARTx,ch);
 		
-	/* µÈ´ý·¢ËÍÊý¾Ý¼Ä´æÆ÷Îª¿Õ */
+	/* ï¿½È´ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ý¼Ä´ï¿½ï¿½ï¿½Îªï¿½ï¿½ */
 	while (USART_GetFlagStatus(pUSARTx, USART_FLAG_TXE) == RESET);	
 }
 
 /*																						
 *********************************************************************************************************
-*	º¯ Êý Ãû: Usart_SendArray
-*	¹¦ÄÜËµÃ÷: ·¢ËÍ8Î»µÄÊý×é
-*	ÐÎ    ²Î£º
-*	·µ »Ø Öµ: ÎÞ
+*	ï¿½ï¿½ ï¿½ï¿½ ï¿½ï¿½: Usart_SendArray
+*	ï¿½ï¿½ï¿½ï¿½Ëµï¿½ï¿½: ï¿½ï¿½ï¿½ï¿½8Î»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+*	ï¿½ï¿½    ï¿½Î£ï¿½
+*	ï¿½ï¿½ ï¿½ï¿½ Öµ: ï¿½ï¿½
 *********************************************************************************************************
 */
 void Usart_SendArray( USART_TypeDef * pUSARTx, uint8_t *array, uint16_t num)
 {
-  uint8_t i;
-	
+  uint16_t i;
+
 	for(i=0; i<num; i++)
   {
-	    /* ·¢ËÍÒ»¸ö×Ö½ÚÊý¾Ýµ½USART */
+	    /* ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½ï¿½Ö½ï¿½ï¿½ï¿½ï¿½Ýµï¿½USART */
 	    Usart_SendByte(pUSARTx,array[i]);	
   
   }
-	/* µÈ´ý·¢ËÍÍê³É */
+	/* ï¿½È´ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ */
 	while(USART_GetFlagStatus(pUSARTx,USART_FLAG_TC)==RESET);
 }
 
 
 /*																						
 *********************************************************************************************************
-*	º¯ Êý Ãû: Usart_SendString
-*	¹¦ÄÜËµÃ÷: ·¢ËÍ×Ö·û´®
-*	ÐÎ    ²Î£ºÎÞ
-*	·µ »Ø Öµ: ÎÞ
+*	ï¿½ï¿½ ï¿½ï¿½ ï¿½ï¿½: Usart_SendString
+*	ï¿½ï¿½ï¿½ï¿½Ëµï¿½ï¿½: ï¿½ï¿½ï¿½ï¿½ï¿½Ö·ï¿½ï¿½ï¿½
+*	ï¿½ï¿½    ï¿½Î£ï¿½ï¿½ï¿½
+*	ï¿½ï¿½ ï¿½ï¿½ Öµ: ï¿½ï¿½
 *********************************************************************************************************
 */
 void Usart_SendString( USART_TypeDef * pUSARTx, char *str)
@@ -123,95 +123,102 @@ void Usart_SendString( USART_TypeDef * pUSARTx, char *str)
       k++;
   } while(*(str + k)!='\0');
   
-  /* µÈ´ý·¢ËÍÍê³É */
+  /* ï¿½È´ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ */
   while(USART_GetFlagStatus(pUSARTx,USART_FLAG_TC)==RESET)
   {}
 }
 
 /*																						
 *********************************************************************************************************
-*	º¯ Êý Ãû: Usart_SendHalfWord
-*	¹¦ÄÜËµÃ÷: 
-*	ÐÎ    ²Î£ºUSART_TypeDef * pUSARTx, uint16_t ch
-*	·µ »Ø Öµ: ÎÞ
+*	ï¿½ï¿½ ï¿½ï¿½ ï¿½ï¿½: Usart_SendHalfWord
+*	ï¿½ï¿½ï¿½ï¿½Ëµï¿½ï¿½: 
+*	ï¿½ï¿½    ï¿½Î£ï¿½USART_TypeDef * pUSARTx, uint16_t ch
+*	ï¿½ï¿½ ï¿½ï¿½ Öµ: ï¿½ï¿½
 *********************************************************************************************************
 */
 void Usart_SendHalfWord( USART_TypeDef * pUSARTx, uint16_t ch)
 {
 	uint8_t temp_h, temp_l;
 	
-	/* È¡³ö¸ß°ËÎ» */
+	/* È¡ï¿½ï¿½ï¿½ß°ï¿½Î» */
 	temp_h = (ch&0XFF00)>>8;
-	/* È¡³öµÍ°ËÎ» */
+	/* È¡ï¿½ï¿½ï¿½Í°ï¿½Î» */
 	temp_l = ch&0XFF;
 	
-	/* ·¢ËÍ¸ß°ËÎ» */
+	/* ï¿½ï¿½ï¿½Í¸ß°ï¿½Î» */
 	USART_SendData(pUSARTx,temp_h);	
 	while (USART_GetFlagStatus(pUSARTx, USART_FLAG_TXE) == RESET);
 	
-	/* ·¢ËÍµÍ°ËÎ» */
+	/* ï¿½ï¿½ï¿½ÍµÍ°ï¿½Î» */
 	USART_SendData(pUSARTx,temp_l);	
 	while (USART_GetFlagStatus(pUSARTx, USART_FLAG_TXE) == RESET);	
 }
 
 /*																						
 *********************************************************************************************************
-*	º¯ Êý Ãû: fputc
-*	¹¦ÄÜËµÃ÷: printfÖØ¶¨Òå
-*	ÐÎ    ²Î£ºint ch, FILE *f
-*	·µ »Ø Öµ: ÎÞ
+*	ï¿½ï¿½ ï¿½ï¿½ ï¿½ï¿½: fputc
+*	ï¿½ï¿½ï¿½ï¿½Ëµï¿½ï¿½: printfï¿½Ø¶ï¿½ï¿½ï¿½
+*	ï¿½ï¿½    ï¿½Î£ï¿½int ch, FILE *f
+*	ï¿½ï¿½ ï¿½ï¿½ Öµ: ï¿½ï¿½
 *********************************************************************************************************
 */
 int fputc(int ch, FILE *f)
 {
-		USART_SendData(DEBUG_USARTx, (uint8_t) ch);		/* ·¢ËÍÒ»¸ö×Ö½ÚÊý¾Ýµ½´®¿Ú */
-		while (USART_GetFlagStatus(DEBUG_USARTx, USART_FLAG_TXE) == RESET);				/* µÈ´ý·¢ËÍÍê±Ï */	
+		USART_SendData(DEBUG_USARTx, (uint8_t) ch);		/* ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½ï¿½Ö½ï¿½ï¿½ï¿½ï¿½Ýµï¿½ï¿½ï¿½ï¿½ï¿½ */
+		while (USART_GetFlagStatus(DEBUG_USARTx, USART_FLAG_TXE) == RESET);				/* ï¿½È´ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ */	
 		return (ch);
 }
 
 
 /*																						
 *********************************************************************************************************
-*	º¯ Êý Ãû: fgetc
-*	¹¦ÄÜËµÃ÷: ÖØ¶¨Ïòc¿âº¯Êýscanfµ½´®¿Ú£¬ÖØÐ´Ïòºó¿ÉÊ¹ÓÃscanf¡¢getcharµÈº¯Êý
-*	ÐÎ    ²Î£ºint ch, FILE *f
-*	·µ »Ø Öµ: ÎÞ
+*	ï¿½ï¿½ ï¿½ï¿½ ï¿½ï¿½: fgetc
+*	ï¿½ï¿½ï¿½ï¿½Ëµï¿½ï¿½: ï¿½Ø¶ï¿½ï¿½ï¿½cï¿½âº¯ï¿½ï¿½scanfï¿½ï¿½ï¿½ï¿½ï¿½Ú£ï¿½ï¿½ï¿½Ð´ï¿½ï¿½ï¿½ï¿½Ê¹ï¿½ï¿½scanfï¿½ï¿½getcharï¿½Èºï¿½ï¿½ï¿½
+*	ï¿½ï¿½    ï¿½Î£ï¿½int ch, FILE *f
+*	ï¿½ï¿½ ï¿½ï¿½ Öµ: ï¿½ï¿½
 *********************************************************************************************************
 */
 int fgetc(FILE *f)
 {
-		/* µÈ´ý´®¿ÚÊäÈëÊý¾Ý */
+		/* ï¿½È´ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ */
 		while (USART_GetFlagStatus(DEBUG_USARTx, USART_FLAG_RXNE) == RESET);
 		return (int)USART_ReceiveData(DEBUG_USARTx);
 }
 
 /*																						
 *********************************************************************************************************
-*	º¯ Êý Ãû: uart_callback
-*	¹¦ÄÜËµÃ÷: uart1£¬uart5´®¿Ú»Øµ÷º¯Êý
-*	ÐÎ    ²Î£ºUSART_TypeDef * usartx ,uint32_t USARTx_Baudrate
-*	·µ »Ø Öµ: ÎÞ
+*	ï¿½ï¿½ ï¿½ï¿½ ï¿½ï¿½: uart_callback
+*	ï¿½ï¿½ï¿½ï¿½Ëµï¿½ï¿½: uart1ï¿½ï¿½uart5ï¿½ï¿½ï¿½Ú»Øµï¿½ï¿½ï¿½ï¿½ï¿½
+*	ï¿½ï¿½    ï¿½Î£ï¿½USART_TypeDef * usartx ,uint32_t USARTx_Baudrate
+*	ï¿½ï¿½ ï¿½ï¿½ Öµ: ï¿½ï¿½
 *********************************************************************************************************
 */
 void uart_callback(USART_TypeDef* usart_periph)
 {
-		stUSART_RECV_DATA_t *pstUart_Recv;
 		uint8_t clear;
 
-		if(usart_periph == DEBUG_USARTx)
-			pstUart_Recv	=	&stUart4_recv_Data;
-		else if(usart_periph == COM_USART5)
-			pstUart_Recv	=	&stUart5_recv_Data;
-		
-		/* Rx */
+		/* Rx: UART4/UART5 ç¼“å†²åŒºå¤§å°ä¸åŒ(è§ bsp_usart.h), åˆ†å¼€åˆ¤æ–­è¶Šç•Œ, é˜²æ­¢
+		 * å•åŒ…è¶…é•¿æ—¶æŠŠ recv_data_len åŽé¢çš„å†…å­˜å†™åã€‚DR å¿…é¡»æ¯æ¬¡éƒ½è¯», å¦åˆ™
+		 * RXNE æ ‡å¿—ä¸æ¸…é›¶ä¼šå¯¼è‡´ä¸­æ–­é£Žæš´ */
 		if(USART_GetITStatus(usart_periph,USART_IT_RXNE)!=RESET)
 		{
-				pstUart_Recv->recv_buf[pstUart_Recv->recv_data_len++] = USART_ReceiveData( usart_periph );
+				uint8_t rx_byte = (uint8_t)USART_ReceiveData( usart_periph );
+
+				if(usart_periph == DEBUG_USARTx)
+				{
+						if(stUart4_recv_Data.recv_data_len < USART_RECV_SIZE)
+								stUart4_recv_Data.recv_buf[stUart4_recv_Data.recv_data_len++] = rx_byte;
+				}
+				else if(usart_periph == COM_USART5)
+				{
+						if(stUart5_recv_Data.recv_data_len < USART5_RECV_SIZE)
+								stUart5_recv_Data.recv_buf[stUart5_recv_Data.recv_data_len++] = rx_byte;
+				}
 		}
 		if(USART_GetITStatus(usart_periph,USART_IT_IDLE)!=RESET)
 		{
-				clear =usart_periph->DR;  										 //ÏÈ¶ÁÈ¡½ÓÊÕ»º´æÖÐÊý¾Ý
-				USART_ClearFlag(usart_periph, USART_IT_IDLE);  //Çå³ý¿ÕÏÐÖÐ¶Ï±êÖ¾Î»
+				clear =usart_periph->DR;  										 //ï¿½È¶ï¿½È¡ï¿½ï¿½ï¿½Õ»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+				USART_ClearFlag(usart_periph, USART_IT_IDLE);  //ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð¶Ï±ï¿½Ö¾Î»
 				xUsartSemaphoreGive(usart_periph);
 		}
 }
@@ -219,7 +226,7 @@ void uart_callback(USART_TypeDef* usart_periph)
 /*
 *********************************************************************************************************
 ** name   : xUsartSemaphoreGive
-** input  : ¶þÖµÁ¿¸³Öµ
+** input  : ï¿½ï¿½Öµï¿½ï¿½ï¿½ï¿½Öµ
 ** output : None
 ** discr  : uart_callback
 *********************************************************************************************************
@@ -238,10 +245,10 @@ void xUsartSemaphoreGive(USART_TypeDef* usart_periph)
 }
 /*																						
 *********************************************************************************************************
-*	º¯ Êý Ãû: USART5_IRQHandler
-*	¹¦ÄÜËµÃ÷: ´®¿Ú5ÖÐ¶Ï
-*	ÐÎ    ²Î£ºint ch, FILE *f
-*	·µ »Ø Öµ: ÎÞ
+*	ï¿½ï¿½ ï¿½ï¿½ ï¿½ï¿½: USART5_IRQHandler
+*	ï¿½ï¿½ï¿½ï¿½Ëµï¿½ï¿½: ï¿½ï¿½ï¿½ï¿½5ï¿½Ð¶ï¿½
+*	ï¿½ï¿½    ï¿½Î£ï¿½int ch, FILE *f
+*	ï¿½ï¿½ ï¿½ï¿½ Öµ: ï¿½ï¿½
 *********************************************************************************************************
 */
 void UART5_IRQHandler(void) 
@@ -251,10 +258,10 @@ void UART5_IRQHandler(void)
 
 /*																						
 *********************************************************************************************************
-*	º¯ Êý Ãû: USART4_IRQHandler
-*	¹¦ÄÜËµÃ÷: ´®¿Ú5ÖÐ¶Ï
-*	ÐÎ    ²Î£ºint ch, FILE *f
-*	·µ »Ø Öµ: ÎÞ
+*	ï¿½ï¿½ ï¿½ï¿½ ï¿½ï¿½: USART4_IRQHandler
+*	ï¿½ï¿½ï¿½ï¿½Ëµï¿½ï¿½: ï¿½ï¿½ï¿½ï¿½5ï¿½Ð¶ï¿½
+*	ï¿½ï¿½    ï¿½Î£ï¿½int ch, FILE *f
+*	ï¿½ï¿½ ï¿½ï¿½ Öµ: ï¿½ï¿½
 *********************************************************************************************************
 */
 void UART4_IRQHandler(void) 

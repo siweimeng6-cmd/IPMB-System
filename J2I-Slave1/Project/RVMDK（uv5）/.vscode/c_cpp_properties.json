@@ -27,6 +27,7 @@
             "defines": [
                 "STM32F10X_HD",
                 "USE_STDPERIPH_DRIVER",
+                "VECT_TAB_OFFSET=0x8000",
                 "__CC_ARM",
                 "__arm__",
                 "__align(x)=",

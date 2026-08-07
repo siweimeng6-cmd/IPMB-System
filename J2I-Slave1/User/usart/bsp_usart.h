@@ -6,21 +6,21 @@
 #include <stdio.h>
 
 /** 
-  * ´®¿Úºê¶¨Òå£¬²»Í¬µÄ´®¿Ú¹ÒÔØµÄ×ÜÏßºÍIO²»Ò»Ñù£¬ÒÆÖ²Ê±ĞèÒªĞŞ¸ÄÕâ¼¸¸öºê
-	* 1-ĞŞ¸Ä×ÜÏßÊ±ÖÓµÄºê£¬uart1¹ÒÔØµ½apb2×ÜÏß£¬ÆäËûuart¹ÒÔØµ½apb1×ÜÏß
-	* 2-ĞŞ¸ÄGPIOµÄºê
+  * ï¿½ï¿½ï¿½Úºê¶¨ï¿½å£¬ï¿½ï¿½Í¬ï¿½Ä´ï¿½ï¿½Ú¹ï¿½ï¿½Øµï¿½ï¿½ï¿½ï¿½ßºï¿½IOï¿½ï¿½Ò»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ö²Ê±ï¿½ï¿½Òªï¿½Ş¸ï¿½ï¿½â¼¸ï¿½ï¿½ï¿½ï¿½
+	* 1-ï¿½Ş¸ï¿½ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ÓµÄºê£¬uart1ï¿½ï¿½ï¿½Øµï¿½apb2ï¿½ï¿½ï¿½ß£ï¿½ï¿½ï¿½ï¿½ï¿½uartï¿½ï¿½ï¿½Øµï¿½apb1ï¿½ï¿½ï¿½ï¿½
+	* 2-ï¿½Ş¸ï¿½GPIOï¿½Äºï¿½
   */
 	
 
 #define COMn                              2U  //uart7 not use
 
- //´®¿Ú4-UART4
+ //ï¿½ï¿½ï¿½ï¿½4-UART4
 #define  DEBUG_USARTx                   UART4
 #define  DEBUG_USART_CLK                RCC_APB1Periph_UART4
 #define  DEBUG_USART_APBxClkCmd         RCC_APB1PeriphClockCmd
 #define  DEBUG_USART_BAUDRATE           115200
 
-// USART GPIO Òı½Åºê¶¨Òå
+// USART GPIO ï¿½ï¿½ï¿½Åºê¶¨ï¿½ï¿½
 #define  DEBUG_USART_GPIO_CLK           (RCC_APB2Periph_GPIOC)
 #define  DEBUG_USART_GPIO_APBxClkCmd    RCC_APB2PeriphClockCmd
     
@@ -32,13 +32,13 @@
 #define  DEBUG_USART_IRQ                UART4_IRQn
 #define  DEBUG_USART_IRQHandler         UART4_IRQHandler
 
-// ´®¿Ú5-UART5
+// ï¿½ï¿½ï¿½ï¿½5-UART5
 #define  COM_USART5                   	UART5
 #define  COM_USART5_CLK                 RCC_APB1Periph_UART5
 #define  COM_USART5_APBxClkCmd          RCC_APB1PeriphClockCmd
 #define  COM_USART5_BAUDRATE            115200
 
-// USART GPIO Òı½Åºê¶¨Òå
+// USART GPIO ï¿½ï¿½ï¿½Åºê¶¨ï¿½ï¿½
 #define  COM_USART5_GPIO_CLK            (RCC_APB2Periph_GPIOC|RCC_APB2Periph_GPIOD)
 #define  COM_USART5_GPIO_APBxClkCmd     RCC_APB2PeriphClockCmd
     
@@ -51,6 +51,10 @@
 #define  COM_USART5_IRQHandler          UART5_IRQHandler
 
 #define USART_RECV_SIZE                    256
+/* UART5(åŠŸèƒ½ä¸²å£)è¦æ”¶å›ºä»¶å‡çº§ Program åˆ†ç‰‡åŒ…: 300å­—èŠ‚åŸå§‹IPMBå¸§ç» Basic Mode
+ * è½¬ä¹‰åæœ€åæƒ…å†µç¿»å€(0xA0èµ·å§‹+0xA5ç»“æŸ+æ¯ä¸ªç‰¹æ®Šå­—èŠ‚å„å¤š1å­—èŠ‚è½¬ä¹‰), å•ç‹¬ç»™ä¸€ä¸ª
+ * å¤Ÿå¤§çš„ç¼“å†²åŒº, ä¸æ”¹ UART4(è°ƒè¯•å£) çš„ 256 å­—èŠ‚, é¿å…å½±å“å…¶ç°æœ‰ç”¨æ³• */
+#define USART5_RECV_SIZE                   700
 
 #pragma pack(1)
 typedef struct
@@ -59,13 +63,20 @@ typedef struct
 	unsigned short recv_data_len;
 }stUSART_RECV_DATA_t,*pstUSART_RECV_DATA_t;
 
-extern stUSART_RECV_DATA_t   stUart4_recv_Data;
-extern stUSART_RECV_DATA_t   stUart5_recv_Data;
+typedef struct
+{
+	unsigned char  recv_buf[USART5_RECV_SIZE];
+	unsigned short recv_data_len;
+}stUSART5_RECV_DATA_t,*pstUSART5_RECV_DATA_t;
+
+extern stUSART_RECV_DATA_t    stUart4_recv_Data;
+extern stUSART5_RECV_DATA_t   stUart5_recv_Data;
 
 
 void xUsartSemaphoreGive(USART_TypeDef* usart_periph);
 void USART_Config(USART_TypeDef * usartx ,uint32_t USARTx_Baudrate);
 void Usart_SendByte( USART_TypeDef * pUSARTx, uint8_t ch);
+void Usart_SendArray( USART_TypeDef * pUSARTx, uint8_t *array, uint16_t num);
 void Usart_SendString( USART_TypeDef * pUSARTx, char *str);
 void Usart_SendHalfWord( USART_TypeDef * pUSARTx, uint16_t ch);
 void UART5_Task(void* parameter);

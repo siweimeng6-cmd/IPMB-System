@@ -125,8 +125,15 @@
 /*!< Uncomment the following line if you need to relocate your vector Table in
      Internal SRAM. */ 
 /* #define VECT_TAB_SRAM */
-#define VECT_TAB_OFFSET  0x0 /*!< Vector Table base offset field. 
+#ifndef VECT_TAB_OFFSET
+#define VECT_TAB_OFFSET  0x0 /*!< Vector Table base offset field.
                                   This value must be a multiple of 0x200. */
+#endif
+/* 用 #ifndef 包一层: 这个文件被 App 和 Bootloader 两个工程共用, App 的
+ * IROM 起始在 0x8000 偏移处(见开发计划 M5), 需要 VECT_TAB_OFFSET=0x8000,
+ * 但 Bootloader 自己就在 0x0, 必须还是 0x0 —— 所以不能直接改这里的默认值,
+ * 而是让 App 工程在编译选项里通过 -D 传 VECT_TAB_OFFSET=0x8000 覆盖掉,
+ * Bootloader 工程不传, 就还用这里的默认值 0x0 */
 
 
 /**

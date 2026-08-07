@@ -1,6 +1,7 @@
 #include "rtos_task.h"
 #include "bsp_init.h"
 #include ".\\gpio\\bsp_gpio.h"
+#include "task_fw_update.h"
 
 stPRINTF_BUF_t stPrintf_Buf;
 stPRINTF_BUF_t stCpu_Buf;
@@ -22,6 +23,8 @@ void Sensor_Task(void* parameter)
 	char fan_buf[48];
 	while (1)
   {
+
+		printf(">>> 本固件为 OTA 升级测试版本 <<<\r\n");
 		Board_ADDR90_temp();
 		Board_ADDR92_temp();
 		Board_ADDR94_temp();
@@ -93,14 +96,24 @@ void UART5_Task(void* parameter)
 				printf("\r\n");
 				stUart5_recv_Data.recv_data_len = 0;
 #else
-			if(stUart5_recv_Data.recv_buf[0] == '?')
+			if(stUart5_recv_Data.recv_buf[0] == 0xA0)
+				{
+					/* IPMI Basic Mode 成帧的固件升级命令(参照友商 ipmudtool 协议),
+					 * 见 task_fw_update.c */
+					FwUpdate_HandleFrame(stUart5_recv_Data.recv_buf, stUart5_recv_Data.recv_data_len);
+					stUart5_recv_Data.recv_data_len = 0;
+				}
+				else if(stUart5_recv_Data.recv_buf[0] == '?')
 				{
 					printf("CPU获取板信息\r\n");
-					Usart_SendString( COM_USART5, (char *)stCpu_Buf.buf);
+					/* 按 size 发送, 不依赖 '\0' 结尾: stCpu_Buf.buf 从未清零过,
+					 * 若本轮内容比上一轮短, Usart_SendString 会把上一轮残留的
+					 * 尾部垃圾也一起发出去 */
+					Usart_SendArray( COM_USART5, stCpu_Buf.buf, stCpu_Buf.size);
 					stCpu_Buf.size=0;
 					stUart5_recv_Data.recv_data_len = 0;
-				}	
-				else//如果不是？，不处理直接清空缓存
+				}
+				else//既不是升级帧也不是？，不处理直接清空缓存
 					stUart5_recv_Data.recv_data_len = 0;
 #endif
 		}

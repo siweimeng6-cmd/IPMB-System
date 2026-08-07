@@ -10,10 +10,10 @@
  *   cs1 覆盖 [0..1]  (rsSA + netFn/lun)
  *   cs2 覆盖 [3..N-1] (rqSA + rqSeq/lun + cmd + data)
  */
-uint8_t IPMB_Calc_Checksum(uint8_t* buf, uint8_t len)
+uint8_t IPMB_Calc_Checksum(uint8_t* buf, uint16_t len)
 {
     uint16_t sum = 0;
-    uint8_t  i;
+    uint16_t i;
     for (i = 0; i < len; i++) {
         sum += buf[i];
     }
@@ -90,7 +90,7 @@ uint8_t IPMB_Build_Response(uint8_t* tx_buf,
 /*
  * 验证 IPMB 帧
  */
-uint8_t IPMB_Verify_Checksum(const uint8_t* rx_buf, uint8_t frame_len)
+uint8_t IPMB_Verify_Checksum(const uint8_t* rx_buf, uint16_t frame_len)
 {
     uint8_t calc1, calc2;
     if (rx_buf == NULL || frame_len < IPMB_MIN_FRAME_LEN) {
@@ -102,7 +102,7 @@ uint8_t IPMB_Verify_Checksum(const uint8_t* rx_buf, uint8_t frame_len)
         return 1;
     }
     /* 尾部校验: [3..N-2] + rx_buf[N-1] 累加应为 0 */
-    calc2 = IPMB_Calc_Checksum((uint8_t*)&rx_buf[3], (uint8_t)(frame_len - 4));
+    calc2 = IPMB_Calc_Checksum((uint8_t*)&rx_buf[3], (uint16_t)(frame_len - 4));
     if (calc2 != rx_buf[frame_len - 1]) {
         return 2;
     }

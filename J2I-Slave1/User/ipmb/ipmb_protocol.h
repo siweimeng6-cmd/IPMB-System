@@ -130,7 +130,7 @@
  * @param  len  数据长度 (不含校验字节本身)
  * @return 校验字节. 含此字节后, [原buf] + cs 的 8-bit 累加和 == 0
  */
-uint8_t IPMB_Calc_Checksum(uint8_t* buf, uint8_t len);
+uint8_t IPMB_Calc_Checksum(uint8_t* buf, uint16_t len);
 
 /**
  * @brief  构造 IPMB 请求帧
@@ -164,7 +164,7 @@ uint8_t IPMB_Build_Response(uint8_t* tx_buf,
  * @param  frame_len 帧总长度
  * @return 0 校验通过, 1 头部校验错, 2 尾部校验错
  */
-uint8_t IPMB_Verify_Checksum(const uint8_t* rx_buf, uint8_t frame_len);
+uint8_t IPMB_Verify_Checksum(const uint8_t* rx_buf, uint16_t frame_len);
 
 /**
  * @brief  从帧中提取 rqSeq

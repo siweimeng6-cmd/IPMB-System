@@ -69,9 +69,10 @@ void BSP_Init(void)
 	USART_Config(DEBUG_USARTx,DEBUG_USART_BAUDRATE);
 	USART_Config(COM_USART5  ,DEBUG_USART_BAUDRATE);
 	printf("/**********************************************/ \r\n");
-	printf("init finished\r\n");	
+	printf("init finished\r\n");
 	printf("last build date：2025.6.11\r\n");
 	printf("only use to test HKV-6UD2K-J2I-BMC\r\n");
+	//printf(">>> 本固件为 OTA 升级测试版本 <<<\r\n");
 	printf("/**********************************************/ \r\n");
 	
 	#if MO_IIC
