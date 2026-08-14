@@ -2,6 +2,7 @@
 #include "bsp_init.h"
 #include ".\\gpio\\bsp_gpio.h"
 #include "task_fw_update.h"
+#include <stdlib.h>   /* strtof()，用于解析主机上报的"CPU_TEMP="温度参数 */
 
 stPRINTF_BUF_t stPrintf_Buf;
 stPRINTF_BUF_t stCpu_Buf;
@@ -24,7 +25,7 @@ void Sensor_Task(void* parameter)
 	while (1)
   {
 
-		printf(">>> 本固件为 OTA 升级测试版本 <<<\r\n");
+		//printf(">>> 本固件为 OTA 升级测试版本 <<<\r\n");
 		Board_ADDR90_temp();
 		Board_ADDR92_temp();
 		Board_ADDR94_temp();
@@ -56,6 +57,17 @@ void Sensor_Task(void* parameter)
 		if ((strlen((char *)stPrintf_Buf.buf) + strlen(fan_buf)) < PRINTF_BUF_SIZE)
 		{
 			strcat((char *)stPrintf_Buf.buf, fan_buf);
+		}
+
+		{
+			char cpu_temp_buf[32];
+			int  cpu_t;
+			uint8_t fresh = Fan_GetCpuTempDebug(&cpu_t);
+			sprintf(cpu_temp_buf, "CpuTemp:%dC(%s)\r\n", cpu_t, fresh ? "fresh" : "stale");
+			if ((strlen((char *)stPrintf_Buf.buf) + strlen(cpu_temp_buf)) < PRINTF_BUF_SIZE)
+			{
+				strcat((char *)stPrintf_Buf.buf, cpu_temp_buf);
+			}
 		}
 
 		stPrintf_Buf.size = strlen((char *)stPrintf_Buf.buf);
@@ -113,7 +125,26 @@ void UART5_Task(void* parameter)
 					stCpu_Buf.size=0;
 					stUart5_recv_Data.recv_data_len = 0;
 				}
-				else//既不是升级帧也不是？，不处理直接清空缓存
+				else if(stUart5_recv_Data.recv_data_len >= 9 &&
+				        strncmp((char *)stUart5_recv_Data.recv_buf, "CPU_TEMP=", 9) == 0)
+				{
+					/* 主机(飞腾D2000)每秒上报一次的CPU温度, 格式"CPU_TEMP=45.2C\n";
+					 * recv_buf不保证'\0'结尾, 先按recv_data_len截断拷贝到本地定长缓冲区再补'\0' */
+					char temp_buf[32];
+					char *endptr;
+					float t;
+					uint16_t len = stUart5_recv_Data.recv_data_len;
+					if(len >= sizeof(temp_buf)) len = sizeof(temp_buf) - 1;
+					memcpy(temp_buf, stUart5_recv_Data.recv_buf, len);
+					temp_buf[len] = '\0';
+
+					t = strtof(temp_buf + 9, &endptr);
+					if(endptr != temp_buf + 9)
+						Fan_UpdateCpuReportedTemp((int)t);
+
+					stUart5_recv_Data.recv_data_len = 0;
+				}
+				else//既不是升级帧、？、也不是CPU_TEMP上报，不处理直接清空缓存
 					stUart5_recv_Data.recv_data_len = 0;
 #endif
 		}

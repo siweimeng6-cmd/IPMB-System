@@ -32,6 +32,9 @@ void Fan_SetManualDuty(uint8_t channel, uint8_t duty_percent);
 void Fan_ClearManualOverride(void);
 uint8_t Fan_GetCurrentDuty(uint8_t channel);
 
+void Fan_UpdateCpuReportedTemp(int temp_c);
+uint8_t Fan_GetCpuTempDebug(int *out_temp_c);  /* 仅供调试打印, 返回1=新鲜/0=过期或从未收到 */
+
 extern TaskHandle_t Fan_Ctrl_Task_Handle;
 
 #endif

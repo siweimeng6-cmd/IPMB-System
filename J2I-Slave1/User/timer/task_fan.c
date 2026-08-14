@@ -11,35 +11,98 @@ typedef struct
 
 static FanChannelState_t s_fan_state[FAN_CH_COUNT];
 
+/* 主机(飞腾D2000)通过UART5每秒上报一次真实CPU温度("CPU_TEMP=45.2C\n",见
+ * task_usart.c的UART5_Task), 解析后写入这里, 供Fan_Ctrl_Task驱动风扇自动温控。
+ * -1沿用board_temp0同款哨兵惯例,表示"从未收到过有效上报" */
+static volatile int        s_cpu_reported_temp_c = -1;
+static volatile uint8_t    s_cpu_temp_ever_valid  = 0;
+static volatile TickType_t s_cpu_temp_last_tick   = 0;
+
 #define FAN_CTRL_LOOP_DELAY_MS       200
-#define FAN_TEMP_LOW_C                40
-#define FAN_TEMP_HIGH_C               65
+#define FAN_AUTO_TEMP_MIN_C           35
+#define FAN_AUTO_TEMP_MAX_C           75
+#define FAN_AUTO_GEAR_COUNT           20
+#define FAN_CPU_TEMP_TIMEOUT_MS     10000   /* 主机每1s上报一次,10s无新帧判定为上报中断 */
 #define FAN_AUTO_DUTY_MIN_PCT         30
 #define FAN_AUTO_DUTY_MAX_PCT        100
-#define FAN_AUTO_DUTY_FAILSAFE_PCT   100   /* board_temp0[0]==-1(从未成功读取)时的故障安全占空比 */
-#define FAN_AUTO_HYSTERESIS_PCT        3   /* 自动模式死区,抑制传感器噪声抖动 */
+#define FAN_AUTO_DUTY_FAILSAFE_PCT   100   /* 从未收到过CPU_TEMP或上报超时时的故障安全占空比 */
+#define FAN_AUTO_HYSTERESIS_PCT        3   /* 自动模式死区,抑制换挡抖动 */
+
+/*
+*********************************************************************************************************
+*	函 数 名: Fan_UpdateCpuReportedTemp
+*	功能说明: 主机UART5上报CPU_TEMP解析成功后调用,刷新最近一次温度和时间戳(供UART5_Task调用)
+*	形    参：temp_c: 主机上报的CPU温度(整数摄氏度)
+*	返 回 值: 无
+*********************************************************************************************************
+*/
+void Fan_UpdateCpuReportedTemp(int temp_c)
+{
+	s_cpu_reported_temp_c = temp_c;
+	s_cpu_temp_ever_valid = 1;
+	s_cpu_temp_last_tick  = xTaskGetTickCount();
+}
+
+/*
+*********************************************************************************************************
+*	函 数 名: Fan_GetCpuTempOrFailsafe
+*	功能说明: 取最近一次主机上报的CPU温度; 从未收到过或超过FAN_CPU_TEMP_TIMEOUT_MS未刷新则返回-1(触发故障安全)
+*	形    参：无
+*	返 回 值: 最近一次有效温度, 或-1
+*********************************************************************************************************
+*/
+static int Fan_GetCpuTempOrFailsafe(void)
+{
+	if(!s_cpu_temp_ever_valid) return -1;
+	if((xTaskGetTickCount() - s_cpu_temp_last_tick) > pdMS_TO_TICKS(FAN_CPU_TEMP_TIMEOUT_MS)) return -1;
+	return s_cpu_reported_temp_c;
+}
+
+/*
+*********************************************************************************************************
+*	函 数 名: Fan_GetCpuTempDebug
+*	功能说明: 仅供调试打印使用(Sensor_Task), 不参与风扇温控判断逻辑
+*	形    参：out_temp_c: 输出最近一次收到的CPU温度(即使已过期也原样输出)
+*	返 回 值: 1=新鲜(未过期)  0=过期或从未收到
+*********************************************************************************************************
+*/
+uint8_t Fan_GetCpuTempDebug(int *out_temp_c)
+{
+	TickType_t now = xTaskGetTickCount();
+	uint8_t fresh = s_cpu_temp_ever_valid &&
+	                ((now - s_cpu_temp_last_tick) <= pdMS_TO_TICKS(FAN_CPU_TEMP_TIMEOUT_MS));
+	*out_temp_c = s_cpu_reported_temp_c;
+	return fresh;
+}
 
 /*
 *********************************************************************************************************
 *	函 数 名: Fan_ComputeAutoDuty
-*	功能说明: 根据CPU温度计算自动模式下的占空比(<=40C:30%下限, 40~65C:线性斜坡, >=65C:100%, -1:故障安全100%)
-*	形    参：temp_c: board_temp0[0]读数
+*	功能说明: 根据主机上报CPU温度计算自动模式下的占空比。35~75C分20档(2C/档,3.5%/档),
+*	          <=35C:30%下限, >=75C:100%上限, -1(从未收到/上报超时):故障安全100%
+*	形    参：temp_c: Fan_GetCpuTempOrFailsafe()的返回值
 *	返 回 值: 0~100
 *********************************************************************************************************
 */
 static uint8_t Fan_ComputeAutoDuty(int temp_c)
 {
+	uint16_t duty_permille;
+
 	if(temp_c == -1)
 		return FAN_AUTO_DUTY_FAILSAFE_PCT;
-	if(temp_c <= FAN_TEMP_LOW_C)
-		return FAN_AUTO_DUTY_MIN_PCT;
-	if(temp_c >= FAN_TEMP_HIGH_C)
-		return FAN_AUTO_DUTY_MAX_PCT;
 
-	return (uint8_t)(FAN_AUTO_DUTY_MIN_PCT +
-		((uint32_t)(temp_c - FAN_TEMP_LOW_C) *
-		 (FAN_AUTO_DUTY_MAX_PCT - FAN_AUTO_DUTY_MIN_PCT)) /
-		(FAN_TEMP_HIGH_C - FAN_TEMP_LOW_C));
+	if(temp_c <= FAN_AUTO_TEMP_MIN_C)
+		duty_permille = FAN_AUTO_DUTY_MIN_PCT * 10;
+	else if(temp_c >= FAN_AUTO_TEMP_MAX_C)
+		duty_permille = FAN_AUTO_DUTY_MAX_PCT * 10;
+	else
+	{
+		/* 此处temp_c必落在(FAN_AUTO_TEMP_MIN_C, FAN_AUTO_TEMP_MAX_C)开区间内,
+		 * (temp_c-MIN_C)恒为正,整数除法截断方向不影响结果 */
+		uint8_t gear = (uint8_t)((temp_c - FAN_AUTO_TEMP_MIN_C) / 2);
+		duty_permille = (uint16_t)(FAN_AUTO_DUTY_MIN_PCT * 10 + gear * 35);
+	}
+	return (uint8_t)(duty_permille / 10);
 }
 
 /*
@@ -111,7 +174,7 @@ void Fan_Ctrl_Task(void* parameter)
 		}
 		s_prev_power_state = mainboard_power_state;
 
-		uint8_t auto_duty = Fan_ComputeAutoDuty(board_temp0[0]);
+		uint8_t auto_duty = Fan_ComputeAutoDuty(Fan_GetCpuTempOrFailsafe());
 		/* 主板电源状态已确认(不是MCU刚上电时的占位默认值) 且 确认为下电 -> 两路风扇强制0%,
 		 * 优先级高于串口手动设置；未确认之前维持Fan_PWM_Init()设的100%故障安全默认值 */
 		uint8_t power_off_confirmed = (uint8_t)(power_state_confirmed && !mainboard_power_state);

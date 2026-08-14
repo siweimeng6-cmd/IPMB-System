@@ -1,0 +1,15 @@
+[Unit]
+Description=Phytium D2000 CPU temperature UART reporter
+After=dev-ttyAMA2.device
+
+[Service]
+Type=simple
+ExecStart=/usr/local/cpu_temp_report/cpu_temp_report.sh
+Restart=always
+RestartSec=3
+User=root
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

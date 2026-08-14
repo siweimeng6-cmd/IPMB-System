@@ -1,0 +1,41 @@
+cd ~/桌面/H5K16M32004/H5K16M32004/ipmudtool
+
+# 给可执行文件加上执行权限（如果之前是拷贝过来的，权限可能丢了）
+chmod +x ipmudtool
+
+# 先看一下你那根USB转串口接的是哪个设备名
+ls /dev/ttyUSB* /dev/ttyACM* 2>/dev/null
+# 注意手册要求 root 权限，设备名换成上一步看到的实际值
+sudo ./ipmudtool /appflash /dev/ttyUSB0 app_latest.bin
+
+sensors
+command -v sensors    # 有输出路径(如 /usr/bin/sensors)说明装了，没输出说明没装
+
+
+
+sensors 命令能用（没有的话先装 lm-sensors）：
+
+sudo apt install lm-sensors   # 或对应发行版的包管理器
+sudo sensors-detect           # 按提示走一遍，一般全部默认回车即可
+sensors                       # 确认能看到温度输出
+
+
+安装温度脚本
+cd /home/user/cpu_temp_report
+sudo bash install_cpu_temp_report.sh      
+  
+
+systemctl status cpu_temp_report.service
+journalctl -u cpu_temp_report.service -f
+
+
+这两个是标准的 systemd 服务检查命令，用来确认 cpu_temp_report.service（前面装的那个温度上报服务）到底有没有正常跑起来。
+
+systemctl status cpu_temp_report.service
+
+看服务当前的运行状态快照，输出大致包括：
+
+Active: active (running) — 服务是否在跑，以及跑了多久
+Loaded: — 服务文件路径、是否开机自启（enabled）
+进程 PID、占用内存等
+最近几行日志（默认显示末尾10条左右）
