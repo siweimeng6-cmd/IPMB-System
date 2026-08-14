@@ -9,7 +9,7 @@ Listing/
 *.lnp
 *.axf
 *.hex
-*.bin
+
 *.elf
 *.iex
 *.sct

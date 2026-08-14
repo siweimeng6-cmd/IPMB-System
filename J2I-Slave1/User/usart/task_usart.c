@@ -25,7 +25,7 @@ void Sensor_Task(void* parameter)
 	while (1)
   {
 
-		//printf(">>> 本固件为 OTA 升级测试版本 <<<\r\n");
+		printf(">>> 本固件为 OTA 升级测试版本 <<<\r\n");
 		Board_ADDR90_temp();
 		Board_ADDR92_temp();
 		Board_ADDR94_temp();
