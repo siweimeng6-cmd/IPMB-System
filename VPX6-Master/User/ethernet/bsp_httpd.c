@@ -234,14 +234,17 @@ static void handle_slot_detail(struct tcp_pcb *pcb, uint8_t slot_id)
 	}
 
 	/* 见 指令.txt②节:cpu_present/self_test/cpu_util/mem_util/bw1/bw2/os_version 硬件限制恒为
-	 * 占位符(0xFF/0xFFFF),不是采集失败;只有 cpu_temp_c/fw_version/power_state 是真实值 */
+	 * 占位符(0xFF/0xFFFF),不是采集失败;只有 cpu_temp_c/fw_version/power_state 是真实值。
+	 * cpu_temp_valid=0 表示原始字节是0xFF(主机从未上报过CPU温度),此时 cpu_temp_c
+	 * 解码出来的127无意义,前端应显示"未使用"而不是当成真实读数 */
 	len += (uint16_t)sprintf(s_httpRespBuf + len,
 		"\"board_status\":{\"valid\":%u,\"cpu_present\":%u,\"self_test\":%u,"
 		"\"cpu_util\":%u,\"mem_util\":%u,\"bw1\":%u,\"bw2\":%u,"
-		"\"cpu_temp_c\":%d,\"os_version\":%u,\"fw_version\":%u,\"power_state\":%u},",
+		"\"cpu_temp_c\":%d,\"cpu_temp_valid\":%u,\"os_version\":%u,\"fw_version\":%u,\"power_state\":%u},",
 		(unsigned)slot->boardstat_valid, (unsigned)slot->cpu_present, (unsigned)slot->self_test,
 		(unsigned)slot->cpu_util, (unsigned)slot->mem_util, (unsigned)slot->bw1, (unsigned)slot->bw2,
-		(int)slot->cpu_temp_raw - 128, (unsigned)slot->os_version, (unsigned)slot->board_fw_version,
+		(int)slot->cpu_temp_raw - 128, (unsigned)(slot->cpu_temp_raw != 0xFF),
+		(unsigned)slot->os_version, (unsigned)slot->board_fw_version,
 		(unsigned)slot->power_state);
 
 	/* 见 指令.txt③节 */

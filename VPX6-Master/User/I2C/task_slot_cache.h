@@ -61,7 +61,8 @@ typedef struct {
 	uint16_t mem_util;
 	uint16_t bw1;
 	uint16_t bw2;
-	uint8_t  cpu_temp_raw;     /* 真实值:LM75A实测温度+128 */
+	uint8_t  cpu_temp_raw;     /* 真实值:主机CPU温度+128(J2I-Slave1经串口收主机上报,2026-08-18起;
+	                             * 0xFF=从未收到过上报。6UHS310P2-Slave2 仍是板载LM75A板卡温度) */
 	uint8_t  os_version;
 	uint8_t  board_fw_version; /* 真实值:借用IPMC软件版本号 */
 	uint8_t  power_state;      /* 真实值:从机实时读PA4(PWR_CTL)电平,0=断电/1=上电,

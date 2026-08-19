@@ -325,7 +325,7 @@ void IPMB_Slave_Handle_GetBoardStatus(const uint8_t* req, uint8_t req_len,
      *   [4..5] 内存利用率 (LE)
      *   [6..7] 带宽1 (LE)
      *   [8..9] 带宽2 (LE)
-     *   [10] CPU 温度 (实际+128)
+     *   [10] CPU 温度 (实际+128) —— 2026-08-18改为主机经串口上报的真实CPU温度
      *   [11] OS 版本
      *   [12] FW 版本
      *   [13] 电源开关状态(0=断电/1=上电,实时读PA4/PWR_CTL引脚)
@@ -336,9 +336,16 @@ void IPMB_Slave_Handle_GetBoardStatus(const uint8_t* req, uint8_t req_len,
     data[4]  = 0xFF; data[5] = 0xFF;  /* 内存% */
     data[6]  = 0xFF; data[7] = 0xFF;  /* 带宽1 */
     data[8]  = 0xFF; data[9] = 0xFF;  /* 带宽2 */
-    /* CPU 温度: 触发一次温度采样, 取 board_temp0[0] + 128 (协议规定) */
-    Board_ADDR90_temp();
-    data[10] = (uint8_t)((int16_t)board_temp0[0] + 128);
+    /* CPU 温度: 主机(飞腾D2000)经UART5每秒上报的真实CPU温度(即调试串口打印的
+     * CpuTemp:xxC那个值), 见 task_usart.c UART5_Task 解析 + task_fan.c 缓存。
+     * 沿用协议既有的 +128 编码; 从未收到过上报时填0xFF表示不可用(主机侧据此
+     * 显示"未使用", 避免被解码成127℃当成真实读数)。
+     * 板卡本体温度(LM75A@0x90)不在这里报了, 它走传感器轮询那条路(编号0x04)。 */
+    {
+        int host_cpu_t;
+        (void)Fan_GetCpuTempDebug(&host_cpu_t);   /* 新鲜度这里不用, 只取最后一次收到的值 */
+        data[10] = (host_cpu_t < 0) ? 0xFF : (uint8_t)(host_cpu_t + 128);
+    }
     data[11] = 0xFF;        /* OS 版本 */
     data[12] = g_fru_state.ipmc_version; /* FW 版本 (用 IPMC 版本占位) */
     /* PA4(PWR_CTL)实时电平回读:低=上电=1,高=下电=0,见 引脚功能汇总.md。

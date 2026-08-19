@@ -20,5 +20,6 @@ IPMB 1.0 规范通信主机（Master）固件工程，基于 STM32F407。请求�
 | 2026-08-02 | 合并入 [IPMB-System](../README.md) 仓库，保留原始提交历史 |
 | 2026-08-17 | Get Slot（槽位号回读）改为每轮轮询都实时查询，不再只在从机首次被发现时读一次 |
 | 2026-08-17 | Get Board System Status 复用原保留字节，新增真实电源开关状态回读（从机现读 PA4/PWR_CTL 引脚电平），网页 Board Status 卡片同步显示"开关机状态" |
+| 2026-08-18 | Get Board System Status 的 CPU 温度字段（响应第 18 字节）改为承载主机真实 CPU 温度：J2I-Slave1 填主机经串口上报的值（`task_fan.c` `Fan_GetCpuTempDebug`，即调试串口 `CpuTemp:xxC`），0xFF 表示未上报、网页显示"未使用"；板卡本体温度改由传感器 0x04（温度1）提供 |
 
 
