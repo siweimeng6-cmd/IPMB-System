@@ -73,9 +73,9 @@ void IPMB_Slot_Poll_Task(void *parameter)
 		slot = Ipmb_SlotCache_FindOrAlloc(target_addr);
 		if (slot == NULL) continue;   /* 8个缓存槽位已满,理论上和 g_slave_addrs 上限同步,不会发生 */
 
-		/* Get Device ID / Get Slot 只在这个槽位第一次被发现(还没有有效数据)时各拉一次:
-		 * 两者都是几乎静态的字段(槽位号只有物理热插拔到别的槽位才会变,罕见场景),
-		 * 没必要每轮重复查询,省下的总线时间留给传感器/状态轮询 */
+		/* Get Device ID 只在这个槽位第一次被发现(还没有有效数据)时拉一次:
+		 * 这是真正静态的字段(设备型号等信息不会变),没必要每轮重复查询,
+		 * 省下的总线时间留给传感器/状态轮询 */
 		if (!slot->devid_valid) {
 			rqseq = s_rqseq;
 			IPMB_Build_GetDeviceID(&pkt, target_addr, IPMB_WEB_HOST_ADDR_7BIT, rqseq);
@@ -83,12 +83,13 @@ void IPMB_Slot_Poll_Task(void *parameter)
 			if (slot_poll_send_wait(&pkt, &rsp, rqseq)) Ipmb_SlotCache_StoreDeviceID(slot, &rsp);
 		}
 
-		if (!slot->slot_valid) {
-			rqseq = s_rqseq;
-			IPMB_Build_GetSlot(&pkt, target_addr, IPMB_WEB_HOST_ADDR_7BIT, rqseq);
-			s_rqseq = (uint8_t)((s_rqseq + 1) & 0x3F);
-			if (slot_poll_send_wait(&pkt, &rsp, rqseq)) Ipmb_SlotCache_StoreSlotReadback(slot, &rsp);
-		}
+		/* Get Slot 改成跟 Board Status 一样每轮都查,实时反映槽位号/GA 引脚状态
+		 * (原来只在第一次发现时读一次,物理换槽位后网页会长期显示旧值) */
+		rqseq = s_rqseq;
+		IPMB_Build_GetSlot(&pkt, target_addr, IPMB_WEB_HOST_ADDR_7BIT, rqseq);
+		s_rqseq = (uint8_t)((s_rqseq + 1) & 0x3F);
+		if (slot_poll_send_wait(&pkt, &rsp, rqseq)) Ipmb_SlotCache_StoreSlotReadback(slot, &rsp);
+		else slot->slot_valid = 0;
 
 		rqseq = s_rqseq;
 		IPMB_Build_GetBoardStatus(&pkt, target_addr, IPMB_WEB_HOST_ADDR_7BIT, rqseq);

@@ -137,15 +137,6 @@
   .kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; font-size: 13px; }
   .kv dt { color: var(--text-dim); }
   .kv dd { margin: 0; font-family: var(--mono); text-align: right; }
-  .note {
-    margin-top: 10px;
-    font-size: 12px;
-    color: var(--warn);
-    background: var(--warn-bg);
-    padding: 8px 10px;
-    border-radius: 6px;
-    line-height: 1.5;
-  }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th, td { text-align: left; padding: 7px 6px; border-bottom: 1px solid var(--border); }
   th { color: var(--text-dim); font-weight: 600; font-size: 11px; text-transform: uppercase; }
@@ -441,7 +432,7 @@
     var html = '<div class="grid">';
 
     // Device ID card
-    html += '<div class="card"><h3>Device ID' + validBadge(dev.valid) + '</h3><dl class="kv">' +
+    html += '<div class="card"><h3>获取板卡在位信息' + validBadge(dev.valid) + '</h3><dl class="kv">' +
       kv('Device ID', dev.device_id) +
       kv('硬件版本', dev.hw_revision) +
       kv('固件大版本', dev.fw_major_rev) +
@@ -453,29 +444,30 @@
       '</dl></div>';
 
     // Board status card
-    html += '<div class="card"><h3>Board Status' + validBadge(bs.valid) + '</h3><dl class="kv">' +
-      kv('CPU在位', bs.cpu_present) +
+    html += '<div class="card"><h3>获取板卡系统状态' + validBadge(bs.valid) + '</h3><dl class="kv">' +
+      kv('开关机状态', bs.power_state ? '开机' : '关机') +
+      kv('CPU在位', bs.cpu_present === 255 ? '未使用' : bs.cpu_present) +
       kv('自检结果', bs.self_test) +
-      kv('CPU利用率', bs.cpu_util) +
-      kv('内存利用率', bs.mem_util) +
-      kv('带宽1', bs.bw1) +
-      kv('带宽2', bs.bw2) +
+      kv('CPU利用率', bs.cpu_util === 65535 ? '未使用' : bs.cpu_util) +
+      kv('内存利用率', bs.mem_util === 65535 ? '未使用' : bs.mem_util) +
+      kv('带宽1', bs.bw1 === 65535 ? '未使用' : bs.bw1) +
+      kv('带宽2', bs.bw2 === 65535 ? '未使用' : bs.bw2) +
       kv('CPU温度(C)', bs.cpu_temp_c) +
-      kv('OS版本', bs.os_version) +
+      kv('OS版本', bs.os_version === 255 ? '未使用' : bs.os_version) +
       kv('固件版本', bs.fw_version) +
-      '</dl><div class="note">' + escapeHtml(bs.note || '') + '</div></div>';
+      '</dl></div>';
 
     // Slot readback + PEM card
     html += '<div class="card"><h3>槽位回读' + validBadge(sr.valid) + '</h3><dl class="kv">' +
       kv('槽位号', sr.slot_id) +
       '</dl></div>';
 
-    html += '<div class="card"><h3>PEM 事件' + validBadge(pem.valid) + '</h3><dl class="kv">' +
+    html += '<div class="card"><h3>主动上报信息' + validBadge(pem.valid) + '</h3><dl class="kv">' +
       kv('阈值超限', pem.threshold_exceeded) +
       kv('系统状态', 'M' + pem.sys_state) +
       kv('原因码', pem.cause) +
       kv('距今', fmtAge(pem.age_ms)) +
-      '</dl><div class="note">' + escapeHtml(pem.note || '') + '</div></div>';
+      '</dl></div>';
 
     html += '</div>'; // grid
 

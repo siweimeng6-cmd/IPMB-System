@@ -21,7 +21,12 @@
 volatile IPMB_Bus_t g_ipmb_active_bus = IPMB_BUS_A;
 TaskHandle_t IPMB_Arbitration_TaskHandle = NULL;
 
-#define IPMB_FAILOVER_TIMEOUT_MS   3000
+/* 主机对 IPMB-A 的轮询间隔并不均匀(忙的时候几十ms一条, 空闲时可能隔好几秒),
+ * 原来的 3000ms 太紧, 会在主机正常但轮询变慢时反复触发 A->B->A 翻转刷屏。
+ * 放宽到 10000ms, 覆盖主机实际最慢的轮询间隔, 只有真正掉线才判超时。
+ * 注: g_ipmb_active_bus 目前只用于日志, 不参与收发决策(请求一律在收到它的
+ * 那条总线上直接回复, 见下方 IPMB_A_Task 里的说明), 所以放宽不影响功能。 */
+#define IPMB_FAILOVER_TIMEOUT_MS   10000
 
 void IPMB_Arbitration_Task(void* parameter)
 {

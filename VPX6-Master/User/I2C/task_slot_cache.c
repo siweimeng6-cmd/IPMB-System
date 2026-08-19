@@ -90,6 +90,7 @@ void Ipmb_SlotCache_StoreBoardStatus(IpmbSlotCache_t *slot, const ipmb_pkt_t *rs
 	slot->cpu_temp_raw = rsp->buf[17];
 	slot->os_version   = rsp->buf[18];
 	slot->board_fw_version = rsp->buf[19];
+	slot->power_state  = rsp->buf[20];
 	slot->boardstat_valid = 1;
 	slot->online = 1;
 	slot->last_seen_tick = xTaskGetTickCount();

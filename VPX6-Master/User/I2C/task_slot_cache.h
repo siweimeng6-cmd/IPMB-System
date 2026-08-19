@@ -52,8 +52,8 @@ typedef struct {
 	uint8_t  mfg_id[3];
 	uint8_t  product_id[2];
 
-	/* Get Board System Status(16h),见 指令.txt②节——已知只有 cpu_temp_raw/board_fw_version
-	 * 是真实值,其余字段硬件限制恒为占位符(0xFF/0xFFFF),不是采集失败 */
+	/* Get Board System Status(16h),见 指令.txt②节——已知只有 cpu_temp_raw/board_fw_version/
+	 * power_state 是真实值,其余字段硬件限制恒为占位符(0xFF/0xFFFF),不是采集失败 */
 	uint8_t  boardstat_valid;
 	uint8_t  cpu_present;
 	uint8_t  self_test;
@@ -64,6 +64,8 @@ typedef struct {
 	uint8_t  cpu_temp_raw;     /* 真实值:LM75A实测温度+128 */
 	uint8_t  os_version;
 	uint8_t  board_fw_version; /* 真实值:借用IPMC软件版本号 */
+	uint8_t  power_state;      /* 真实值:从机实时读PA4(PWR_CTL)电平,0=断电/1=上电,
+	                             * 2026-08-17复用原保留字节新增,见 指令.txt②节 */
 
 	/* Get Slot(15h),见 指令.txt③节——真实读取GA0~GA4硬件电平 */
 	uint8_t  slot_valid;

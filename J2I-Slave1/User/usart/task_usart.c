@@ -60,6 +60,22 @@ void Sensor_Task(void* parameter)
 		}
 
 		{
+			/* PB5(PAYLD_SYSPOWER)是主板电源状态硬件反馈脚: 低=已上电 高=已下电。
+			 * mainboard_power_state 是防抖确认后的软状态, power_state_confirmed=0
+			 * 表示MCU上电未满10s、PB5还没开始监测, 此时软状态不可信 */
+			char pwr_buf[64];
+			uint8_t pb5 = GPIO_ReadInputDataBit(PAYLD_SYSPOWER_GPIO_PORT, PAYLD_SYSPOWER_GPIO_PIN);
+			sprintf(pwr_buf, "PB5:%u(%s) Power:%s%s\r\n",
+			        (unsigned int)pb5, pb5 ? "high=off" : "low=on",
+			        mainboard_power_state ? "ON" : "OFF",
+			        power_state_confirmed ? "" : "(unconfirmed)");
+			if ((strlen((char *)stPrintf_Buf.buf) + strlen(pwr_buf)) < PRINTF_BUF_SIZE)
+			{
+				strcat((char *)stPrintf_Buf.buf, pwr_buf);
+			}
+		}
+
+		{
 			char cpu_temp_buf[32];
 			int  cpu_t;
 			uint8_t fresh = Fan_GetCpuTempDebug(&cpu_t);

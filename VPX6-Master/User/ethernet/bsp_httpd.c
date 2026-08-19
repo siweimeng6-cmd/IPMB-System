@@ -234,16 +234,15 @@ static void handle_slot_detail(struct tcp_pcb *pcb, uint8_t slot_id)
 	}
 
 	/* 见 指令.txt②节:cpu_present/self_test/cpu_util/mem_util/bw1/bw2/os_version 硬件限制恒为
-	 * 占位符(0xFF/0xFFFF),不是采集失败;只有 cpu_temp_c/fw_version 是真实值 */
+	 * 占位符(0xFF/0xFFFF),不是采集失败;只有 cpu_temp_c/fw_version/power_state 是真实值 */
 	len += (uint16_t)sprintf(s_httpRespBuf + len,
 		"\"board_status\":{\"valid\":%u,\"cpu_present\":%u,\"self_test\":%u,"
 		"\"cpu_util\":%u,\"mem_util\":%u,\"bw1\":%u,\"bw2\":%u,"
-		"\"cpu_temp_c\":%d,\"os_version\":%u,\"fw_version\":%u,"
-		"\"note\":\"cpu_present/self_test/cpu_util/mem_util/bw1/bw2/os_version bound by "
-		"slave hardware limits, always placeholder, see 指令.txt\"},",
+		"\"cpu_temp_c\":%d,\"os_version\":%u,\"fw_version\":%u,\"power_state\":%u},",
 		(unsigned)slot->boardstat_valid, (unsigned)slot->cpu_present, (unsigned)slot->self_test,
 		(unsigned)slot->cpu_util, (unsigned)slot->mem_util, (unsigned)slot->bw1, (unsigned)slot->bw2,
-		(int)slot->cpu_temp_raw - 128, (unsigned)slot->os_version, (unsigned)slot->board_fw_version);
+		(int)slot->cpu_temp_raw - 128, (unsigned)slot->os_version, (unsigned)slot->board_fw_version,
+		(unsigned)slot->power_state);
 
 	/* 见 指令.txt③节 */
 	len += (uint16_t)sprintf(s_httpRespBuf + len,
@@ -265,8 +264,7 @@ static void handle_slot_detail(struct tcp_pcb *pcb, uint8_t slot_id)
 
 	/* 见 指令.txt⑦节:从机侧传感器编号字段固定00h,PEM 只反映全局系统状态变化 */
 	len += (uint16_t)sprintf(s_httpRespBuf + len,
-		"\"pem\":{\"valid\":%u,\"threshold_exceeded\":%u,\"sys_state\":%u,\"cause\":%u,\"age_ms\":%u,"
-		"\"note\":\"slave does not identify which sensor channel tripped, global state only\"}}",
+		"\"pem\":{\"valid\":%u,\"threshold_exceeded\":%u,\"sys_state\":%u,\"cause\":%u,\"age_ms\":%u}}",
 		(unsigned)slot->pem_valid, (unsigned)slot->pem_threshold_exceeded,
 		(unsigned)slot->pem_sys_state, (unsigned)slot->pem_cause,
 		(unsigned)((now - slot->pem_last_tick) * portTICK_PERIOD_MS));

@@ -316,7 +316,7 @@ void IPMB_Slave_Handle_GetBoardStatus(const uint8_t* req, uint8_t req_len,
      *   [10] CPU 温度 (实际+128)
      *   [11] OS 版本
      *   [12] FW 版本
-     *   [13] 保留
+     *   [13] 电源开关状态(0=断电/1=上电,实时读PA4/PWR_CTL引脚)
      */
     data[0]  = 0xFF;        /* CPU 在位: 未检测 (F103 测不到 CPU) */
     data[1]  = 0x01;        /* 自检: 通过 */
@@ -329,7 +329,9 @@ void IPMB_Slave_Handle_GetBoardStatus(const uint8_t* req, uint8_t req_len,
     data[10] = (uint8_t)((int16_t)board_temp0[0] + 128);
     data[11] = 0xFF;        /* OS 版本 */
     data[12] = g_fru_state.ipmc_version; /* FW 版本 (用 IPMC 版本占位) */
-    data[13] = 0;
+    /* PA4(PWR_CTL)实时电平回读:低=上电=1,高=下电=0,见 引脚功能汇总.md。
+     * 现读现填,不转发 g_fru_state.power_state 这个命令下发时的软件镜像 */
+    data[13] = (GPIO_ReadInputDataBit(PWR_CTL_GPIO_PORT, PWR_CTL_GPIO_PIN) == Bit_RESET) ? 1 : 0;
 
     *resp_len = IPMB_Build_Response(resp, rqSA, IPMB_NETFN_APP, 0,
                                      own_addr, rqSeq, IPMB_CMD_GET_BOARD_STATUS,
