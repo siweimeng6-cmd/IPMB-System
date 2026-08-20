@@ -31,6 +31,11 @@ typedef struct {
 	                   * bsp_httpd.c 渲染 JSON 时统一处理,缓存这里只做协议原始值的忠实转存。
 	                   * raw==0x7FFF 视为"数据不可用"哨兵(来自 HKV-6UD2K-J2I_BMC 版本的约定)。 */
 	uint8_t valid;   /* 最近一次轮询是否拿到有效响应(完成码=00、长度够、且不是0x7FFF哨兵) */
+	uint8_t fail_streak;   /* 【2026-08-20】连续"真超时"次数,供 task_slot_poll.c 做指数退避:
+	                         * 物理没接的那几路每轮都要吃满 2×400ms,是单轮耗时最大的一块。
+	                         * 由轮询任务维护(拿到响应清0、超时递增),跳过周期 = 1<<min(streak,3)。
+	                         * 注意只统计"一条响应都没等到",不统计 raw==0x7FFF 哨兵——后者是
+	                         * 正常且很快的响应,只是数据不可用,不构成开销,见 StoreSensor。 */
 } IpmbSensorCache_t;
 
 typedef struct {

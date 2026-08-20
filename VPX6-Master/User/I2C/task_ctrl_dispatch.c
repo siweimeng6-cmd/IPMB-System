@@ -95,11 +95,23 @@ static uint8_t ctrl_dispatch_send_one(uint8_t target_addr, uint8_t control_req,
 
 	for (attempt = 0; attempt < 2 && !got_it; attempt++) {
 		TickType_t deadline;
+		BaseType_t queued_a = pdFALSE;
+		BaseType_t queued_b = pdFALSE;
 
-		if (xIPMB_CmdQueue != NULL)  xQueueSend(xIPMB_CmdQueue,  &pkt, (TickType_t)10);
-		if (xIPMB_CmdQueue2 != NULL) xQueueSend(xIPMB_CmdQueue2, &pkt, (TickType_t)10);
+		/* 控制命令不能排在后台发现/状态/传感器轮询之后，否则深度 6 的 FIFO
+		 * 最坏会积压数百毫秒，控制层先判超时而命令稍后才真正执行。
+		 * dispatch 运行在独立任务中，可以等待队列腾位；确认至少一路入队成功后
+		 * 才启动响应计时，避免原来忽略 xQueueSend 失败造成的必然超时。 */
+		if (xIPMB_CmdQueue != NULL)
+			queued_a = xQueueSendToFront(xIPMB_CmdQueue, &pkt, pdMS_TO_TICKS(200));
+		if (xIPMB_CmdQueue2 != NULL)
+			queued_b = xQueueSendToFront(xIPMB_CmdQueue2, &pkt, pdMS_TO_TICKS(200));
 
-		deadline = xTaskGetTickCount() + pdMS_TO_TICKS(400);
+		if (queued_a != pdTRUE && queued_b != pdTRUE)
+			continue;
+
+		/* 底层单次回包预算为 300ms；这里额外覆盖任务切换和响应 mailbox 转发。 */
+		deadline = xTaskGetTickCount() + pdMS_TO_TICKS(700);
 		while (!got_it && (int32_t)(deadline - xTaskGetTickCount()) > 0) {
 			if (xIPMB_CtrlRspQueue != NULL &&
 			    xQueueReceive(xIPMB_CtrlRspQueue, &rsp, (TickType_t)20) == pdTRUE) {

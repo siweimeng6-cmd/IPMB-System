@@ -44,6 +44,18 @@ extern xQueueHandle xIPMB_DiscRspQueue2;
 extern xQueueHandle xIPMB_WebRspQueue;
 extern xQueueHandle xIPMB_WebRspQueue2;
 
+/* I2C1/I2C2_SendRequest 等从机主动回写响应的预算,按请求来源(rqSA 标记,即
+ * 帧的 buf[3])分级——同一个字节已经被用来做响应分流,这里复用同一套约定。
+ * 分级的理由:预算只在"从机没按时回包"时才真正花掉,而这三类请求对慢响应的
+ * 容忍度完全不同。控制命令(开关机/复位)从机侧要真的执行动作,回包慢属正常,
+ * 必须给够,否则网页"最近操作"会显示超时;后台轮询和发现探测则是高频、
+ * 可容忍单次丢失的,让它们也陪等 300ms 会把深度只有 6 的命令队列堵住,
+ * 表现为网页传感器长时间"未刷新"。 */
+#define IPMB_BUDGET_CTRL_MS      300   /* 控制命令(rqSA=IPMB_CTRL_HOST_ADDR_7BIT) */
+#define IPMB_BUDGET_POLL_MS      150   /* 网页槽位轮询(rqSA=IPMB_WEB_HOST_ADDR_7BIT) */
+#define IPMB_BUDGET_DISC_MS       80   /* 地址发现探测(rqSA=IPMB_DISC_HOST_ADDR_7BIT) */
+#define IPMB_BUDGET_DEFAULT_MS   300   /* 串口手动命令等其余来源 */
+
 /* PEM(Platform Event Message)主动上报专用队列:从机在非请求窗口主动 write
  * 过来的帧(is_pem_push_frame() 判定命中)转发到这里。与 xIPMB_RspQueue/2
  * (深度5 FIFO、xQueueSend,突发多条响应排队不覆盖)分开,PEM 事件用

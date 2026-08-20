@@ -251,11 +251,15 @@ static volatile i2c1_master_state_t s_i2c1_master_state = I2C1_M_IDLE;
 static volatile uint8_t s_i2c1_master_tx_idx = 0;
 static volatile uint8_t s_i2c1_master_tx_target_addr = 0;
 static volatile uint8_t s_i2c1_master_done = 0;   /* 一次事务(写)完成标志,供任务轮询 */
+/* 写事务是"被 NACK 中止"而不是"正常发完 STOP"。done 标志两种情况都会置 1,
+ * 光看 done 区分不出来,而这两种情况后续该不该等响应完全相反,故单开一个标志。 */
+static volatile uint8_t s_i2c1_master_nack = 0;
 
 static volatile i2c2_master_state_t s_i2c2_master_state = I2C2_M_IDLE;
 static volatile uint8_t s_i2c2_master_tx_idx = 0;
 static volatile uint8_t s_i2c2_master_tx_target_addr = 0;
 static volatile uint8_t s_i2c2_master_done = 0;   /* 一次事务(写)完成标志,供任务轮询 */
+static volatile uint8_t s_i2c2_master_nack = 0;   /* 同 s_i2c1_master_nack */
 
 /* ============================================================
  * 从机接收状态(捕获从机主动 write 回来的响应帧)
@@ -391,6 +395,10 @@ void i2c_recv_callback(I2C_TypeDef* I2Cx)
 			I2C_GenerateSTOP(I2Cx, ENABLE);
 			if (I2Cx == I2C1)
 			{
+				/* 只有本机正发起主机事务时,这次 AF 才是"目标从机没应答"。从机模式下
+				 * 主机 NACK 末字节同样置 AF,那种情况不能拿来判定本机请求失败,故先看
+				 * state——必须在下面改写成 IDLE 之前判断。 */
+				if (s_i2c1_master_state != I2C1_M_IDLE) s_i2c1_master_nack = 1;
 				s_i2c1_master_state = I2C1_M_IDLE;
 				s_i2c1_master_done = 1;   /* 通知 SendRequest 事务已终止 */
 				s_i2c1_srx_state = I2C1_SRX_IDLE;
@@ -398,6 +406,7 @@ void i2c_recv_callback(I2C_TypeDef* I2Cx)
 			}
 			else if (I2Cx == I2C2)
 			{
+				if (s_i2c2_master_state != I2C2_M_IDLE) s_i2c2_master_nack = 1;
 				s_i2c2_master_state = I2C2_M_IDLE;
 				s_i2c2_master_done = 1;   /* 通知 SendRequest 事务已终止 */
 				s_i2c2_srx_state = I2C2_SRX_IDLE;
@@ -545,7 +554,8 @@ void I2C2_EV_IRQHandler_Master(void)
 			/* 本机发起的写请求被 NACK:发 STOP 中止事务,通知任务不必再等 */
 			I2C_GenerateSTOP(I2C2, ENABLE);
 			s_i2c2_master_state = I2C2_M_IDLE;
-			s_i2c2_master_done = 1;   /* 事务因 NACK 中止,通知任务不必再等 */
+			s_i2c2_master_done = 1;   /* 事务因 NACK 中止 */
+			s_i2c2_master_nack = 1;   /* ★ 真正让任务"不必再等"的是这个标志,不是 done */
 		}
 		s_i2c2_srx_state = I2C2_SRX_IDLE;   /* 丢弃可能在收的半帧,防止状态错乱 */
 		return;
@@ -699,9 +709,11 @@ static void i2c2_forward_pem_and_clear(void)
 *	          tx_len:请求字节数
 *	          rx_expect_len:期望接收字节数(响应净荷,不含硬件 I2C 帧头)
 *	          target_addr:从机 7bit 地址(IPMB-A = 0x0A)
+*	          budget_ms:等从机主动回写响应的总预算,由调用方按请求来源分级
+*	                    (见 task_i2c.h 的 IPMB_BUDGET_*_MS),传 0 用 300ms 默认值
 *********************************************************************************************************
 */
-void I2C2_SendRequest(const uint8_t *tx_buf, uint8_t tx_len, uint8_t rx_expect_len, uint8_t target_addr)
+void I2C2_SendRequest(const uint8_t *tx_buf, uint8_t tx_len, uint8_t rx_expect_len, uint8_t target_addr, uint16_t budget_ms)
 {
 	uint8_t i;
 	uint16_t guard;
@@ -722,6 +734,12 @@ void I2C2_SendRequest(const uint8_t *tx_buf, uint8_t tx_len, uint8_t rx_expect_l
 	s_i2c2_master_tx_idx = 0;
 	s_i2c2_master_tx_target_addr = target_addr;
 	s_i2c2_master_done = 0;
+	s_i2c2_master_nack = 0;
+
+	/* 必须在发请求前清理旧通知。若放到写事务完成后，从机可能已经快速回包，
+	 * 此时再 take 会误吞本次响应的有效通知，造成“动作已执行但上层超时”。 */
+	xSemaphoreTake(I2C2ReceiveSemaphore, 0);
+	i2c2_forward_pem_and_clear();
 
 	I2C_AcknowledgeConfig(I2C2, ENABLE);
 
@@ -757,15 +775,29 @@ void I2C2_SendRequest(const uint8_t *tx_buf, uint8_t tx_len, uint8_t rx_expect_l
 	guard = 0;
 	while (!s_i2c2_master_done && guard < 20) { vTaskDelay(1); guard++; }
 
-	/* 写事务超时 (从机不存在/无应答):中断返回,不再等响应 */
+	/* 写事务超时 (总线卡死/START 没发起来):中断返回,不再等响应 */
 	if (!s_i2c2_master_done) return;
+
+	/* 地址被 NACK:这个地址上根本没有从机,请求帧一个字节都没送出去,协议上不可能
+	 * 有后续的主动回写响应,等满预算纯属浪费。注意不能靠 s_i2c2_master_done 判断
+	 * ——NACK 分支同样置 done=1,那条注释说的"不必再等"过去从未真正生效。
+	 * 这是发现任务每 15 秒扫 32 个候选地址时的主要开销来源。 */
+	if (s_i2c2_master_nack)
+	{
+		i2c2_recv_data_struct.recv_data_len = 0;
+		return;
+	}
 
 	/* ============ 事务 2:等从机主动 write 回来的响应帧 ============
 	 * F103 从机收到 STOP 后在自己任务里处理请求、主动切主机把响应帧 write 回本机
 	 * (IPMB_HOST_I2C_ADDR),不再是"等被读"。这里改为在 I2C2ReceiveSemaphore 上
 	 * 等待——由 I2C2_EV_IRQHandler_Master 的从机接收分支在收完一帧(STOPF)后
 	 * xSemaphoreGiveFromISR。耗时不定,按"响应 byte5(cmd 回显)==本次请求 cmd"
-	 * 匹配,不匹配当残留帧丢弃继续等,总预算 ~120ms(与旧的 12×8ms 轮询量级一致)。
+	 * 匹配,不匹配当残留帧丢弃继续等。后台轮询和串口打印同时活跃时，从机任务
+	 * 调度及主动回写可能越过旧的 120ms 边界，因此控制命令的预算放宽到 300ms。
+	 * 【2026-08-20】预算改由调用方按请求来源传入(见 task_i2c.c 里按 rqSA 分级):
+	 * 控制命令要留足从机执行时间,后台轮询/发现探测不必陪等这么久,否则整条
+	 * 命令队列会被慢速失败请求堵住,网页传感器刷不出来。
 	 * 【2026-07-28更正】同 I2C1_SendRequest 的更正:光比 cmd 字节不够,连续点
 	 * 同一个控制按钮(同 cmd)时,上一条请求晚到的响应会被这里误收,导致这次
 	 * 真正的响应错失、间歇性超时。补上 byte4(rqSeq<<2|lun)校验。 */
@@ -773,12 +805,9 @@ void I2C2_SendRequest(const uint8_t *tx_buf, uint8_t tx_len, uint8_t rx_expect_l
 		uint8_t expect_cmd   = tx_buf[5];
 		uint8_t expect_byte4 = tx_buf[4];   /* rqSeq<<2|lun,协议要求原样回显 */
 		TickType_t t_start = xTaskGetTickCount();
-		const TickType_t budget = pdMS_TO_TICKS(120);
+		const TickType_t budget = pdMS_TO_TICKS(budget_ms ? budget_ms : 300);   /* 传0按旧的全局默认走 */
 
 		(void)rx_expect_len;   /* 响应长度由请求方在任务层估算后仅用于超时兜底,这里靠 STOPF 天然定帧长 */
-
-		xSemaphoreTake(I2C2ReceiveSemaphore, 0);   /* 清掉可能残留的旧 give */
-		i2c2_forward_pem_and_clear();   /* 清空前先看一眼是不是从机主动推来的 PEM,是则转发不丢 */
 
 		for (;;)
 		{
@@ -831,7 +860,8 @@ void I2C1_EV_IRQHandler_Master(void)
 			/* 本机发起的写请求被 NACK:发 STOP 中止事务,通知任务不必再等 */
 			I2C_GenerateSTOP(I2C1, ENABLE);
 			s_i2c1_master_state = I2C1_M_IDLE;
-			s_i2c1_master_done = 1;   /* 事务因 NACK 中止,通知任务不必再等 */
+			s_i2c1_master_done = 1;   /* 事务因 NACK 中止 */
+			s_i2c1_master_nack = 1;   /* ★ 真正让任务"不必再等"的是这个标志,不是 done */
 		}
 		s_i2c1_srx_state = I2C1_SRX_IDLE;   /* 丢弃可能在收的半帧,防止状态错乱 */
 		return;
@@ -949,9 +979,11 @@ void I2C1_EV_IRQHandler_Master(void)
 *	          tx_len:请求字节数
 *	          rx_expect_len:期望接收字节数(响应净荷,不含硬件 I2C 帧头)
 *	          target_addr:从机 7bit 地址
+*	          budget_ms:等从机主动回写响应的总预算,由调用方按请求来源分级
+*	                    (见 task_i2c.h 的 IPMB_BUDGET_*_MS),传 0 用 300ms 默认值
 *********************************************************************************************************
 */
-void I2C1_SendRequest(const uint8_t *tx_buf, uint8_t tx_len, uint8_t rx_expect_len, uint8_t target_addr)
+void I2C1_SendRequest(const uint8_t *tx_buf, uint8_t tx_len, uint8_t rx_expect_len, uint8_t target_addr, uint16_t budget_ms)
 {
 	uint8_t i;
 	uint16_t guard;
@@ -972,6 +1004,12 @@ void I2C1_SendRequest(const uint8_t *tx_buf, uint8_t tx_len, uint8_t rx_expect_l
 	s_i2c1_master_tx_idx = 0;
 	s_i2c1_master_tx_target_addr = target_addr;
 	s_i2c1_master_done = 0;
+	s_i2c1_master_nack = 0;
+
+	/* 必须在发请求前清理旧通知。若放到写事务完成后，从机可能已经快速回包，
+	 * 此时再 take 会误吞本次响应的有效通知，造成“动作已执行但上层超时”。 */
+	xSemaphoreTake(I2C1ReceiveSemaphore, 0);
+	i2c1_forward_pem_and_clear();
 
 	I2C_AcknowledgeConfig(I2C1, ENABLE);
 
@@ -1007,16 +1045,30 @@ void I2C1_SendRequest(const uint8_t *tx_buf, uint8_t tx_len, uint8_t rx_expect_l
 	guard = 0;
 	while (!s_i2c1_master_done && guard < 20) { vTaskDelay(1); guard++; }
 
-	/* 写事务超时 (从机不存在/无应答):中断返回,不再等响应 */
+	/* 写事务超时 (总线卡死/START 没发起来):中断返回,不再等响应 */
 	if (!s_i2c1_master_done) return;
+
+	/* 地址被 NACK:这个地址上根本没有从机,请求帧一个字节都没送出去,协议上不可能
+	 * 有后续的主动回写响应,等满预算纯属浪费。注意不能靠 s_i2c1_master_done 判断
+	 * ——NACK 分支同样置 done=1,那条注释说的"不必再等"过去从未真正生效。
+	 * 这是发现任务每 15 秒扫 32 个候选地址时的主要开销来源。 */
+	if (s_i2c1_master_nack)
+	{
+		i2c1_recv_data_struct.recv_data_len = 0;
+		return;
+	}
 
 	/* ============ 事务 2:等从机主动 write 回来的响应帧 ============
 	 * F103 从机(IPMB-A)收到 STOP 后在自己任务里处理请求、主动切主机把响应帧
 	 * write 回本机(IPMB_HOST_I2C_ADDR),不再是"等被读"。这里改为在
 	 * I2C1ReceiveSemaphore 上等待——由 I2C1_EV_IRQHandler_Master 的从机接收
 	 * 分支在收完一帧(STOPF)后 xSemaphoreGiveFromISR。耗时不定,按"响应
-	 * byte5(cmd 回显)==本次请求 cmd"匹配,不匹配当残留帧丢弃继续等,总预算
-	 * ~120ms(与旧的 12×8ms 轮询量级一致)。
+	 * byte5(cmd 回显)==本次请求 cmd"匹配,不匹配当残留帧丢弃继续等。
+	 * 后台轮询和串口打印同时活跃时，从机任务调度及主动回写可能越过旧的
+	 * 120ms 边界，因此控制命令的预算放宽到 300ms。
+	 * 【2026-08-20】预算改由调用方按请求来源传入(见 task_i2c.c 里按 rqSA 分级):
+	 * 控制命令要留足从机执行时间,后台轮询/发现探测不必陪等这么久,否则整条
+	 * 命令队列会被慢速失败请求堵住,网页传感器刷不出来。
 	 * 【2026-07-28更正】光比 cmd 字节不够:网页控制台的开机/关机/复位/软关机/
 	 * 软复位这几个按钮全都是同一个 cmd(Set FRU Activation),连续点同一个按钮
 	 * 测试时,如果上一条请求的响应因总线偶发延迟晚到,会被这里误判成"这次"的
@@ -1028,12 +1080,9 @@ void I2C1_SendRequest(const uint8_t *tx_buf, uint8_t tx_len, uint8_t rx_expect_l
 		uint8_t expect_cmd   = tx_buf[5];
 		uint8_t expect_byte4 = tx_buf[4];   /* rqSeq<<2|lun,协议要求原样回显 */
 		TickType_t t_start = xTaskGetTickCount();
-		const TickType_t budget = pdMS_TO_TICKS(120);
+		const TickType_t budget = pdMS_TO_TICKS(budget_ms ? budget_ms : 300);   /* 传0按旧的全局默认走 */
 
 		(void)rx_expect_len;   /* 响应长度由请求方在任务层估算后仅用于超时兜底,这里靠 STOPF 天然定帧长 */
-
-		xSemaphoreTake(I2C1ReceiveSemaphore, 0);   /* 清掉可能残留的旧 give */
-		i2c1_forward_pem_and_clear();   /* 清空前先看一眼是不是从机主动推来的 PEM,是则转发不丢 */
 
 		for (;;)
 		{

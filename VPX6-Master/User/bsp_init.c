@@ -168,9 +168,11 @@ void task_create(void)
 		else
 			printf("Create IPMB_PEM_Poll_Task failed!\r\n");
 
-		/* 网页控制台多槽位轮询(2026-07-27替换原单从机 Web_Sensor_Poll_Task):每3秒轮转
-		 * 发现表里的下一个槽位,拉取 Device ID/Board Status/7个传感器,结果存进
-		 * task_slot_cache.c 的 g_slot_cache[],供 bsp_httpd.c JSON API 直接读取 */
+		/* 网页控制台多槽位轮询(2026-07-27替换原单从机 Web_Sensor_Poll_Task):每1秒把
+		 * 发现表里的槽位全查一遍(2026-08-20 从"每3秒轮转下一个"改成全扫描,让全槽位
+		 * 刷新周期压进网页 3s 的拉取间隔),拉取 Device ID/Slot/Board Status/PEM/7个
+		 * 传感器,结果存进 task_slot_cache.c 的 g_slot_cache[],供 bsp_httpd.c JSON API
+		 * 直接读取 */
 		xReturn = xTaskCreate((TaskFunction_t )IPMB_Slot_Poll_Task,
 													(const char*    )"IPMB_Slot_Poll",
 													(uint16_t       )256,

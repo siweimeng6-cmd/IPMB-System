@@ -147,6 +147,23 @@ uint8_t is_pem_push_frame(const uint8_t *buf, uint16_t len)
 	return 1;
 }
 
+/**
+ * @brief  按请求来源(rqSA 标记 buf[3])决定 SendRequest 等响应的预算。
+ *         这个字节本来就是响应分流的依据(见下面 I2C1_Task/I2C2_Task 里
+ *         Disc/Web/Ctrl mailbox 的分派),这里复用同一套约定,不引入新标记。
+ *         各档位的取值和理由见 task_i2c.h 的 IPMB_BUDGET_*_MS。
+ *         A/B 两路共用本函数,保持两个 Task 逐行对称的既有约定。
+ */
+static uint16_t ipmb_budget_for(const ipmb_pkt_t *pkt)
+{
+	switch (pkt->buf[3]) {
+	case IPMB_DISC_HOST_ADDR_7BIT: return IPMB_BUDGET_DISC_MS;
+	case IPMB_WEB_HOST_ADDR_7BIT:  return IPMB_BUDGET_POLL_MS;
+	case IPMB_CTRL_HOST_ADDR_7BIT: return IPMB_BUDGET_CTRL_MS;
+	default:                       return IPMB_BUDGET_DEFAULT_MS;
+	}
+}
+
 static void ipmi_fill_resp(ipmi_resp_t *r,
                            uint8_t resp_addr,
                            uint8_t req_netfn,
@@ -585,17 +602,16 @@ void I2C1_Task(void* parameter)
 				}
 
 				i2c1_recv_data_struct.recv_data_len = 0;
-				I2C1_SendRequest(pkt.buf, pkt.len, rx_target_len, pkt.buf[0]);
+				I2C1_SendRequest(pkt.buf, pkt.len, rx_target_len, pkt.buf[0], ipmb_budget_for(&pkt));
 
+				/* 【2026-08-20】这里原来还有一个"等 recv_data_len >= rx_target_len,
+				 * 上限 IPMB_TEST_TIMEOUT_MS*2 = 100ms"的轮询循环,是旧的"主机再发起
+				 * 一次读事务"模型的遗留物,已删除。I2C1_SendRequest 内部靠 STOPF 天然
+				 * 定帧长,返回时要么已收完整帧、要么已把 recv_data_len 清 0,无需再等;
+				 * 而它的退出条件拿 rx_target_len(估算值,很多命令走 default:25)比较,
+				 * 响应比估算短时和超时时都会白等满 100ms。删掉后本段与 I2C2_Task
+				 * 完全对称(I2C2_Task 从来就没有这个循环)。 */
 				{
-					uint16_t waited_ms = 0;
-					while (waited_ms < IPMB_TEST_TIMEOUT_MS * 2)
-					{
-						vTaskDelay(1);
-						waited_ms++;
-						if (i2c1_recv_data_struct.recv_data_len >= rx_target_len)
-							break;
-					}
 					if (i2c1_recv_data_struct.recv_data_len == 0) {
 						if (!is_disc) {   /* 探测 miss 属正常, 静默; 仅普通命令超时计失败 */
 							// Usart_SendString(IPMB_TEST_COM, "<ERR 2 timeout>\r\n");   /* 日志太吵,注释掉打印,失败计数/failover逻辑保留 */
@@ -700,7 +716,7 @@ void I2C2_Task(void* parameter)
 			}
 
 			i2c2_recv_data_struct.recv_data_len = 0;
-			I2C2_SendRequest(pkt.buf, pkt.len, rx_target_len, pkt.buf[0]);
+			I2C2_SendRequest(pkt.buf, pkt.len, rx_target_len, pkt.buf[0], ipmb_budget_for(&pkt));
 
 			{
 				ipmb_pkt_t rsp;

@@ -129,9 +129,11 @@ void I2C1_SlaveSendResponse(const uint8_t *buf, uint8_t len);
 #else
 /* 主机模式:IPMB-A 作为主机发起 IPMI 请求 */
 void I2C1_EV_IRQHandler_Master(void);
-void I2C1_SendRequest(const uint8_t *buf, uint8_t len, uint8_t rx_expect_len, uint8_t target_addr);
+/* budget_ms: 等从机主动回写响应的总预算,由调用方按请求来源分级(见 task_i2c.h
+ * 的 IPMB_BUDGET_*_MS)。传 0 沿用 300ms 默认值。 */
+void I2C1_SendRequest(const uint8_t *buf, uint8_t len, uint8_t rx_expect_len, uint8_t target_addr, uint16_t budget_ms);
 #endif
-void I2C2_SendRequest(const uint8_t *buf, uint8_t len, uint8_t rx_expect_len, uint8_t target_addr);
+void I2C2_SendRequest(const uint8_t *buf, uint8_t len, uint8_t rx_expect_len, uint8_t target_addr, uint16_t budget_ms);
 void I2C2_EV_IRQHandler_Master(void);
 
 
