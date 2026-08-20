@@ -62,7 +62,7 @@ extern xQueueHandle xIPMB_PemQueue2;
  * 0=关闭自动轮询,串口不再周期刷 <RSP-B ...02...> 自动上报。
  * 只关"自动发起",不影响手动 ipmb 3x ... 02 查询(仍正常打印)。 */
 #ifndef IPMB_PEM_AUTO_POLL_ENABLE
-#define IPMB_PEM_AUTO_POLL_ENABLE   1
+#define IPMB_PEM_AUTO_POLL_ENABLE   0
 #endif
 
 /* 判断一帧是否是 PEM 主动上报/轮询答复帧形状(从机按 IPMB_Build_Request

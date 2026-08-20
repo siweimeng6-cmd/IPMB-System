@@ -17,16 +17,19 @@
 /* =================== IPMB-A/B 总线仲裁 =================== */
 
 /* 上电默认优先 IPMB-A. 判定依据: g_i2c_slave_a.last_active_tick 是否在
- * IPMB_FAILOVER_TIMEOUT_MS 内更新过 (ISR 中无条件更新, 见 bsp_i2c_slave.c) */
+ * IPMB_FAILOVER_TIMEOUT_MS 内更新过。注意这个时间戳只在 I2C 地址匹配中断里
+ * 更新(见 bsp_i2c_slave.c), 即必须主机点名寻址本机才刷新, 总线上发给别的
+ * 从机的流量不算。 */
 volatile IPMB_Bus_t g_ipmb_active_bus = IPMB_BUS_A;
 TaskHandle_t IPMB_Arbitration_TaskHandle = NULL;
 
-/* 主机对 IPMB-A 的轮询间隔并不均匀(忙的时候几十ms一条, 空闲时可能隔好几秒),
- * 原来的 3000ms 太紧, 会在主机正常但轮询变慢时反复触发 A->B->A 翻转刷屏。
- * 放宽到 10000ms, 覆盖主机实际最慢的轮询间隔, 只有真正掉线才判超时。
+/* 阈值必须大于"主机点名寻址本机"的最大间隔, 否则链路正常也会反复 A->B->A
+ * 翻转刷屏。主机侧两个节奏都很慢: 槽位轮询是每3秒tick只服务一个槽位的轮转
+ * (2个在线槽位时每块从机约6~8秒才轮到一次), 发现重扫更是15秒一轮。
+ * 所以取 20000ms(> 15s 发现周期 + 余量), 两个从机工程保持一致。
  * 注: g_ipmb_active_bus 目前只用于日志, 不参与收发决策(请求一律在收到它的
  * 那条总线上直接回复, 见下方 IPMB_A_Task 里的说明), 所以放宽不影响功能。 */
-#define IPMB_FAILOVER_TIMEOUT_MS   10000
+#define IPMB_FAILOVER_TIMEOUT_MS   20000
 
 void IPMB_Arbitration_Task(void* parameter)
 {
