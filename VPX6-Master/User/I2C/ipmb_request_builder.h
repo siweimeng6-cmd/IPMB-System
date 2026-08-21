@@ -41,12 +41,25 @@ uint8_t IPMB_Build_GetDeviceSDR(ipmb_pkt_t *pkt, uint8_t target_addr, uint8_t rq
 uint8_t IPMB_Build_GetSensorReading(ipmb_pkt_t *pkt, uint8_t target_addr, uint8_t rqsa, uint8_t rqseq,
                                      uint8_t sensor_num);
 
-/* control_req: 0x00~0x11,见 指令.txt⑧节/419-434行逐条核实过的行为表。
+/* control_req: 0x00~0x11,见 指令.txt⑧节逐条核实过的行为表(含2026-08-20新增的
+ * 0x0A=恢复温控自动模式)。
  * data/data_len: 只有 0x07(1字节档位)/0x08(2字节rpm,低字节在前)/0x09(1字节BCD版本)
- * 这三个控制请求需要附带数据,其余传 data=NULL,data_len=0 即可。data_len 最大 4。 */
+ * 这三个控制请求需要附带数据,其余(含新增的0x0A)传 data=NULL,data_len=0 即可。
+ * data_len 最大 4。 */
 uint8_t IPMB_Build_SetFruActivation(ipmb_pkt_t *pkt, uint8_t target_addr, uint8_t rqsa, uint8_t rqseq,
                                      uint8_t control_req, const uint8_t *data, uint8_t data_len);
 
 uint8_t IPMB_Build_PlatformEventPoll(ipmb_pkt_t *pkt, uint8_t target_addr, uint8_t rqsa, uint8_t rqseq);
+
+/* 板卡身份信息(2026-08-20新增,对应从机 ipmb_board_identity.c):field_id 0~10,
+ * 0~6 是原来 Get Device ID 里的 7 个字段(现在可写了),7~10 是新增自定义文本字段
+ * (CPU型号/内存容量/主板型号/序列号)。field_id 含义见 task_slot_cache.h 顶部注释。 */
+uint8_t IPMB_Build_GetBoardIdentityField(ipmb_pkt_t *pkt, uint8_t target_addr, uint8_t rqsa, uint8_t rqseq,
+                                          uint8_t field_id);
+
+/* value_len 上限 63(跟从机 IPMB_BOARD_IDENTITY_TEXT_MAX 一致,两个工程各自独立烧录,
+ * 没有共享头文件,这里的 63 是两侧约定好的协议常量,不是巧合) */
+uint8_t IPMB_Build_SetBoardIdentityField(ipmb_pkt_t *pkt, uint8_t target_addr, uint8_t rqsa, uint8_t rqseq,
+                                          uint8_t field_id, const uint8_t *value, uint8_t value_len);
 
 #endif

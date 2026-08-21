@@ -98,6 +98,10 @@
 /* OEM 自定义 */
 #define IPMB_CMD_GET_SLOT            0x15    /* OEM: Get Slot */
 #define IPMB_CMD_GET_BOARD_STATUS    0x16    /* OEM: Get Board System Status */
+/* 板卡身份信息(2026-08-20新增,见 ipmb_board_identity.c):按 field_id 取/存一个字段,
+ * field_id 0~6 驱动 Get Device ID(0x01) 响应本体,7~10 是新增自定义文本字段 */
+#define IPMB_CMD_GET_BOARD_IDENTITY  0x17    /* OEM: Get Board Identity Field */
+#define IPMB_CMD_SET_BOARD_IDENTITY  0x18    /* OEM: Set Board Identity Field */
 
 /* 传感器类 (netFn 0x04) */
 #define IPMB_CMD_PEM                 0x02    /* Platform Event Message */

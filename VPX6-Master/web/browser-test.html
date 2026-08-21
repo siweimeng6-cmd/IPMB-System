@@ -236,6 +236,7 @@
     <input type="text" id="baseUrlInput" placeholder="192.168.100.20">
   </div>
   <span id="connBadge" class="badge bad"><span class="dot"></span>离线</span>
+  <button class="btn" id="identityViewBtn" style="margin-left:8px">设置</button>
   <div class="spacer"></div>
   <span id="healthMeta" class="meta"></span>
 </header>
@@ -267,9 +268,27 @@
     { key: 'set_threshold_normal', label: '设置阈值正常', needValue: false },
     { key: 'set_fan_default_level', label: '设置风扇默认档位', needValue: true, valueHint: '0-100' },
     { key: 'set_fan_max_rpm', label: '设置风扇最大转速', needValue: true, valueHint: 'RPM' },
+    { key: 'resume_temp_control', label: '恢复温控', needValue: false },
     { key: 'set_ipmc_version', label: '设置IPMC版本(BCD)', needValue: true, valueHint: '如 0x21=2.1', hex: true },
     { key: 'set_i2c_speed_100k', label: 'I2C速率 100Kbps(全总线)', needValue: false },
     { key: 'set_i2c_speed_400k', label: 'I2C速率 400Kbps(全总线)', needValue: false }
+  ];
+
+  // "设置"视图(2026-08-20新增)可编辑的 12 个板卡身份字段,field_id 跟主控
+  // task_slot_cache.h/bsp_httpd.c 的约定一一对应:0~4数值、5~6十六进制、7~11文本(UTF-8,最长63字节,支持中文)
+  var IDENTITY_FIELDS = [
+    { id: 0, label: 'Device ID', type: 'num' },
+    { id: 1, label: '硬件版本', type: 'num' },
+    { id: 2, label: '固件大版本', type: 'num' },
+    { id: 3, label: 'IPMI版本', type: 'num' },
+    { id: 4, label: '设备支持', type: 'num' },
+    { id: 5, label: '厂家ID', type: 'hex', hexLen: 6, hint: '6位十六进制,如 0000AA' },
+    { id: 6, label: '产品ID', type: 'hex', hexLen: 4, hint: '4位十六进制,如 0001' },
+    { id: 7, label: 'CPU型号', type: 'text' },
+    { id: 8, label: '内存容量', type: 'text' },
+    { id: 9, label: '主板型号', type: 'text' },
+    { id: 10, label: '序列号', type: 'text' },
+    { id: 11, label: 'OS版本', type: 'text' }
   ];
 
   var state = {
@@ -277,7 +296,8 @@
     slots: [],
     selectedSlot: null,
     detail: null,
-    tickets: []   // {ticket, actionLabel, status, completion_code, note}
+    tickets: [],   // {ticket, actionLabel, status, completion_code, note}
+    view: 'detail'   // 'detail' | 'identity' —— 2026-08-20新增,同页整体切换到"设置"视图
   };
 
   var els = {
@@ -285,7 +305,8 @@
     connBadge: document.getElementById('connBadge'),
     healthMeta: document.getElementById('healthMeta'),
     slotList: document.getElementById('slotList'),
-    mainPanel: document.getElementById('mainPanel')
+    mainPanel: document.getElementById('mainPanel'),
+    identityViewBtn: document.getElementById('identityViewBtn')
   };
 
   function loadBaseUrl() {
@@ -378,6 +399,7 @@
 
   function selectSlot(id) {
     state.selectedSlot = id;
+    state.view = 'detail';   // 从侧边栏选槽位视为想看详情,自动切回详情视图
     renderSlotList();
     renderPanelSkeleton();   // 控制面板/高级面板/操作记录只在切换槽位时重建一次
     refreshDetail();
@@ -409,6 +431,149 @@
     renderTicketLog();
   }
 
+  // ---------- identity settings view(2026-08-20新增) ----------
+  // "设置"是同页整体切换:跟 renderPanelSkeleton() 一样整体重写 #mainPanel,
+  // 不新建 html 文件、不引入路由,复用既有的 ticket 提交/轮询/展示逻辑。
+
+  function showIdentityView() {
+    state.view = 'identity';
+    renderIdentityView();
+  }
+
+  function backFromIdentityView() {
+    state.view = 'detail';
+    renderPanelSkeleton();
+    refreshDetail();
+  }
+
+  // 只有 field_id 0(Device ID,原始数值)/5~6(厂家ID/产品ID,已是十六进制文本)/
+  // 7~10(自定义文本字段)能从 /api/v1/slots/{n} 的响应里可靠地拿到原始值来回填。
+  // field_id 1~4 那几个数值字段(硬件版本等)在详情接口里是人类可读的格式化字符串
+  // (比如"1,sdr (0x81)"),没法可靠地反解回原始字节,所以留空输入框,旁边改显示
+  // 当前格式化值当提示——用户要改就直接填新值,不填就保持不变。
+  function identityFieldPrefill(f) {
+    var dev = (state.detail && state.detail.device_id) || {};
+    var cf = (state.detail && state.detail.custom_fields) || {};
+    switch (f.id) {
+      case 0: return (dev.device_id !== undefined && dev.device_id !== null) ? String(dev.device_id) : '';
+      case 5: return (dev.mfg_id || '').replace(/-/g, '');
+      case 6: return dev.product_id || '';
+      case 7: return cf.cpu_model || '';
+      case 8: return cf.mem_size || '';
+      case 9: return cf.board_model || '';
+      case 10: return cf.serial_number || '';
+      case 11: return cf.os_version_text || '';
+      default: return '';
+    }
+  }
+  function identityFieldHint(f) {
+    var dev = (state.detail && state.detail.device_id) || {};
+    switch (f.id) {
+      case 1: return '当前: ' + (dev.hw_revision || '-');
+      case 2: return '当前: ' + (dev.fw_major_rev || '-');
+      case 3: return '当前: ' + (dev.ipmi_version || '-');
+      case 4: return '当前: ' + (dev.device_support || '-');
+      default: return f.hint || '';
+    }
+  }
+
+  function renderIdentityView() {
+    var html = '<div class="card" style="margin-bottom:16px"><h3>板卡身份信息设置' +
+      (state.selectedSlot === null ? '' : (' - 槽位' + state.selectedSlot)) + '</h3>';
+
+    if (state.selectedSlot === null) {
+      html += '<div class="empty-state">请先在左侧选择一个槽位</div></div>';
+    } else {
+      html += IDENTITY_FIELDS.map(function (f) {
+        var prefill = escapeHtml(identityFieldPrefill(f));
+        var hint = escapeHtml(identityFieldHint(f));
+        var inputType = (f.type === 'num') ? 'number' : 'text';
+        // text 字段不设 maxlength:HTML maxlength 按 UTF-16 code unit(约等于字符数)计数,
+        // 跟真正的63字节UTF-8上限对不上(中文一个字3字节,单一数字没法同时约束纯英文和
+        // 纯中文),真正的长度门槛在保存时按UTF-8字节数校验,见 onIdentitySaveClick
+        var extra = (f.type === 'num') ? ' min="0" max="255"' :
+          (f.type === 'hex' ? (' maxlength="' + f.hexLen + '"') : '');
+        return '<div class="adv-row"><span class="adv-label">' + escapeHtml(f.label) +
+          (hint ? ('<br><span style="color:var(--text-dim);font-size:11px">' + hint + '</span>') : '') +
+          '</span><input type="' + inputType + '" data-identity-field="' + f.id +
+          '" value="' + prefill + '"' + extra + '></div>';
+      }).join('') +
+        '<div class="btn-row" style="margin-top:12px">' +
+        '<button class="btn primary" id="identitySaveBtn">保存全部修改</button>' +
+        '<button class="btn" id="identityBackBtn">返回</button>' +
+        '</div></div>';
+    }
+
+    html += '<div class="card"><h3>最近操作</h3><div class="ticket-log" id="ticketLog"></div></div>';
+
+    els.mainPanel.innerHTML = html;
+    renderTicketLog();
+
+    var backBtn = document.getElementById('identityBackBtn');
+    if (backBtn) backBtn.addEventListener('click', backFromIdentityView);
+    var saveBtn = document.getElementById('identitySaveBtn');
+    if (saveBtn) saveBtn.addEventListener('click', function () { onIdentitySaveClick(saveBtn); });
+  }
+
+  function utf8ByteLength(str) {
+    return new TextEncoder().encode(str).length;
+  }
+
+  function submitIdentityField(fieldId, value, label) {
+    apiPost('/api/v1/slots/' + state.selectedSlot + '/identity', { field_id: fieldId, value: value })
+      .then(function (resp) {
+        addTicket(resp.ticket, '槽位' + state.selectedSlot + ' ' + label, '');
+        pollTicket(resp.ticket);
+      }).catch(function (err) {
+        alert(label + ' 提交失败: ' + (err && err.error ? err.error : JSON.stringify(err)));
+      });
+  }
+
+  function onIdentitySaveClick(btn) {
+    var submitted = 0;
+    btn.disabled = true;
+
+    IDENTITY_FIELDS.forEach(function (f) {
+      var input = els.mainPanel.querySelector('input[data-identity-field="' + f.id + '"]');
+      if (!input) return;
+      var raw = input.value.trim();
+
+      if (f.type === 'num') {
+        if (raw === '') return;   // 空着表示不改这个字段
+        var n = parseInt(raw, 10);
+        if (isNaN(n) || n < 0 || n > 255) { alert(f.label + ' 必须是 0-255 的整数'); return; }
+        submitIdentityField(f.id, n, f.label);
+        submitted++;
+        return;
+      }
+
+      if (raw === identityFieldPrefill(f)) return;   // 没变化,不提交,省EEPROM写次数
+
+      if (f.type === 'hex') {
+        if (!/^[0-9a-fA-F]+$/.test(raw) || raw.length !== f.hexLen) {
+          alert(f.label + ' 必须是 ' + f.hexLen + ' 位十六进制字符');
+          return;
+        }
+        submitIdentityField(f.id, raw, f.label);
+        submitted++;
+        return;
+      }
+
+      // text 字段:按 UTF-8 字节数校验(不是 JS 字符串 .length 字符数),跟从机/主控的
+      // 真实上限(63字节)对齐——纯英文最多63个字符,纯中文(每字3字节)最多约21个字
+      var byteLen = utf8ByteLength(raw);
+      if (byteLen > 63) {
+        alert(f.label + ' 超出长度限制(UTF-8 编码后 ' + byteLen + ' 字节,最多 63 字节)');
+        return;
+      }
+      submitIdentityField(f.id, raw, f.label);
+      submitted++;
+    });
+
+    btn.disabled = false;
+    if (submitted === 0) alert('没有需要保存的修改');
+  }
+
   // ---------- slot detail ----------
   function refreshDetail() {
     if (state.selectedSlot === null) return;
@@ -427,11 +592,12 @@
     if (!d) return;
     var area = document.getElementById('dataArea');
     if (!area) return;   // 用户已经切到别的槽位/离开页面,这次响应就丢弃
-    var dev = d.device_id, bs = d.board_status, sr = d.slot_readback, pem = d.pem;
+    var dev = d.device_id, bs = d.board_status, sr = d.slot_readback, pem = d.pem, cf = d.custom_fields || {};
 
     var html = '<div class="grid">';
 
-    // Device ID card
+    // Device ID card(2026-08-20:CPU型号/内存容量/主板型号/序列号并入这张卡片——
+    // 都是静态硬件身份信息,跟厂家ID/产品ID是同一类东西,不再单开"自定义信息"卡片)
     html += '<div class="card"><h3>获取板卡在位信息' + validBadge(dev.valid) + '</h3><dl class="kv">' +
       kv('Device ID', dev.device_id) +
       kv('硬件版本', dev.hw_revision) +
@@ -441,6 +607,10 @@
       kv('设备支持', dev.device_support) +
       kv('厂家ID', dev.mfg_id) +
       kv('产品ID', dev.product_id) +
+      kv('CPU型号', cf.cpu_model || '-') +
+      kv('内存容量', cf.mem_size || '-') +
+      kv('主板型号', cf.board_model || '-') +
+      kv('序列号', cf.serial_number || '-') +
       '</dl></div>';
 
     // Board status card
@@ -452,7 +622,7 @@
       kv('带宽1', bs.bw1 === 65535 ? '未使用' : bs.bw1) +
       kv('带宽2', bs.bw2 === 65535 ? '未使用' : bs.bw2) +
       kv('CPU温度(C)', bs.cpu_temp_valid ? bs.cpu_temp_c : '未使用') +
-      kv('OS版本', bs.os_version === 255 ? '未使用' : bs.os_version) +
+      kv('OS版本', cf.os_version_text || '未使用') +
       kv('固件版本', bs.fw_version) +
       '</dl></div>';
 
@@ -581,8 +751,12 @@
   function refreshAll() {
     refreshHealth();
     refreshSlots();
-    if (state.selectedSlot !== null) refreshDetail();
+    // 只在详情视图才刷新详情:设置视图没有 #dataArea,且不希望 3 秒定时器
+    // 打断用户正在填写的设置表单
+    if (state.view === 'detail' && state.selectedSlot !== null) refreshDetail();
   }
+
+  if (els.identityViewBtn) els.identityViewBtn.addEventListener('click', showIdentityView);
 
   loadBaseUrl();
   refreshAll();
@@ -591,4 +765,3 @@
 </script>
 </body>
 </html>
-

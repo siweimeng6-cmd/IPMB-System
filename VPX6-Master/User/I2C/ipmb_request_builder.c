@@ -89,3 +89,24 @@ uint8_t IPMB_Build_PlatformEventPoll(ipmb_pkt_t *pkt, uint8_t target_addr, uint8
 	rb_put_header(pkt, target_addr, 0x04, rqsa, rqseq, 0x02);   /* netFn=04h,cmd=02h,无数据 */
 	return rb_put_tail_chk(pkt);
 }
+
+uint8_t IPMB_Build_GetBoardIdentityField(ipmb_pkt_t *pkt, uint8_t target_addr, uint8_t rqsa, uint8_t rqseq,
+                                          uint8_t field_id)
+{
+	rb_put_header(pkt, target_addr, 0x06, rqsa, rqseq, 0x17);   /* netFn=06h(App),cmd=17h */
+	pkt->buf[pkt->len++] = field_id;                            /* data[0]=field_id */
+	return rb_put_tail_chk(pkt);
+}
+
+uint8_t IPMB_Build_SetBoardIdentityField(ipmb_pkt_t *pkt, uint8_t target_addr, uint8_t rqsa, uint8_t rqseq,
+                                          uint8_t field_id, const uint8_t *value, uint8_t value_len)
+{
+	uint8_t i;
+	if (value_len > 63) return 0;   /* 跟从机 IPMB_BOARD_IDENTITY_TEXT_MAX 一致 */
+
+	rb_put_header(pkt, target_addr, 0x06, rqsa, rqseq, 0x18);   /* netFn=06h,cmd=18h */
+	pkt->buf[pkt->len++] = field_id;                            /* data[0]=field_id */
+	pkt->buf[pkt->len++] = value_len;                           /* data[1]=value_len */
+	for (i = 0; i < value_len; i++) pkt->buf[pkt->len++] = value[i];
+	return rb_put_tail_chk(pkt);
+}

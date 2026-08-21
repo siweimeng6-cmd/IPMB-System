@@ -709,6 +709,11 @@
               <FileType>5</FileType>
               <FilePath>..\..\指令.txt</FilePath>
             </File>
+            <File>
+              <FileName>ipmb_board_identity.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\User\ipmb\ipmb_board_identity.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

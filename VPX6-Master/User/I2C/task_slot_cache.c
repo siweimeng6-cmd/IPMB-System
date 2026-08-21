@@ -137,6 +137,38 @@ void Ipmb_SlotCache_StoreSensor(IpmbSlotCache_t *slot, uint8_t sensor_num, const
 	}
 }
 
+/* 响应帧布局(Get Board Identity Field 0x17,见 J2I-Slave1 ipmb_slave.c
+ * IPMB_Slave_Handle_GetBoardIdentity):buf[6]=完成码,buf[7]=field_id(回显),
+ * buf[8]=value_len,buf[9..9+value_len-1]=文本内容(不含结尾'\0')。
+ * 只处理 field_id 7~11(自定义文本字段),0~6 走标准 Get Device ID,归
+ * Ipmb_SlotCache_StoreDeviceID 管,不受这个函数影响。 */
+void Ipmb_SlotCache_StoreCustomField(IpmbSlotCache_t *slot, uint8_t field_id, const ipmb_pkt_t *rsp)
+{
+	char *dst;
+	uint8_t value_len;
+
+	if (slot == NULL) return;
+
+	switch (field_id) {
+	case 7:  dst = slot->cpu_model;     break;
+	case 8:  dst = slot->mem_size;      break;
+	case 9:  dst = slot->board_model;   break;
+	case 10: dst = slot->serial_number; break;
+	case 11: dst = slot->os_version_text; break;
+	default: return;
+	}
+
+	if (rsp == NULL || rsp->len < 9 || rsp->buf[6] != 0x00 || rsp->buf[7] != field_id) return;
+
+	value_len = rsp->buf[8];
+	if (value_len > 63 || rsp->len < 9 + value_len) return;
+
+	memcpy(dst, &rsp->buf[9], value_len);
+	dst[value_len] = '\0';
+	slot->online = 1;
+	slot->last_seen_tick = xTaskGetTickCount();
+}
+
 /* PEM 帧布局见 task_i2c.c IPMB_Test_Command_Task 已验证过的解析(pem->buf[3]=源地址,
  * buf[9]=eventType,buf[10]=eventData1,buf[11]=eventData2),照抄同一套位运算 */
 void Ipmb_SlotCache_StorePem(uint8_t addr, const ipmb_pem_pkt_t *pem)

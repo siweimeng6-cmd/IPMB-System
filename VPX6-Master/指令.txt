@@ -430,6 +430,7 @@ ipmb 8E B0 C2 20 00 0C 03 00 09 14 B4
 | 07h | 设风扇默认档位 | **不驱动PWM**,把请求带的1字节数据存进`g_fru_state.fan_default_level` | 见下方新增 |
 | 08h | 设风扇最大转速 | **不驱动PWM**,把请求带的2字节数据(低字节在前)存进`g_fru_state.fan_max_rpm` | 见下方新增 |
 | 09h | 设置IPMC软件版本 | 把请求带的1字节数据存进`g_fru_state.ipmc_version` | 已在上方(第420-421行) |
+| 0Ah | 恢复温控自动模式(2026-08-20新增) | 清除风扇`manual_override`标志(`Fan_ClearManualOverride()`),之后两路风扇转速重新由`Fan_Ctrl_Task`按CPU温度自动计算(`Fan_ComputeAutoDuty`),不需要额外数据 | 见下方新增 |
 | 10h | 设置I2C通讯速率100Kbps | **空桩**,只打印提示、返回成功,不真正切换I2C时钟(已知遗留项,2026-07-03确认) | 见下方新增 |
 | 11h | 设置I2C通讯速率400Kbps | 同上,空桩 | 见下方新增 |
 | 其它值 | 未定义 | 落入`default`分支,返回0xFF→响应完成码C2(IPMB_CC_INVALID_DATA_FIELD) | — |
@@ -442,6 +443,11 @@ ipmb 8E B0 C2 20 00 0C 03 00 07 05 C5
 # 08h 设风扇最大转速(带2字节数据,低字节在前;示例设为3000rpm=0BB8h→低B8高0B)
 # 尾校验: -(20+00+0C+03+00+08+B8+0B) mod 256 = -(FA) = 06
 ipmb 8E B0 C2 20 00 0C 03 00 08 B8 0B 06
+期望响应(9字节): 20 B4 2C 8E 00 0C 00 03 63
+
+# 0Ah 恢复温控自动模式(无额外数据,清除风扇手动覆盖标志,详见 task_fan.c Fan_ClearManualOverride)
+# 尾校验: -(20+00+0C+03+00+0A) mod 256 = -(39) = C7
+ipmb 8E B0 C2 20 00 0C 03 00 0A C7
 期望响应(9字节): 20 B4 2C 8E 00 0C 00 03 63
 
 # 10h 设置I2C通讯速率100Kbps(无额外数据)

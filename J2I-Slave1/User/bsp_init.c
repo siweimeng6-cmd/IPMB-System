@@ -1,6 +1,7 @@
 #include "bsp_init.h"
 #include "FreeRTOS.h"
 #include ".\i2c\bsp_eeprom.h"
+#include ".\ipmb\ipmb_board_identity.h"
 
 
 TaskHandle_t Sensor_Task_Handle = NULL;
@@ -79,6 +80,7 @@ void BSP_Init(void)
 	Init_MO_I2C();
 	EEPROM_SelfTest();
 	Runtime_Init();
+	BoardIdentity_Init();
 	#else
 	Init_HARD_I2C();
 	#endif

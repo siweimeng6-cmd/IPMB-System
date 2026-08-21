@@ -90,6 +90,23 @@ static void slot_poll_one(uint8_t target_addr)
 		if (slot_poll_send_wait(&pkt, &rsp, rqseq)) Ipmb_SlotCache_StoreDeviceID(slot, &rsp);
 	}
 
+	/* 板卡身份信息 field_id 7~11(2026-08-20新增,11=OS版本随后补的):CPU型号/内存容量/
+	 * 主板型号/序列号/OS版本,跟 Device ID 一样是从机 EEPROM 里的静态数据,只读一次——
+	 * 全部 5 个字段都成功拿到过才置 custom_valid,任一失败都不置位,下一轮继续重试整组 */
+	if (!slot->custom_valid) {
+		uint8_t field_id, all_ok = 1;
+		for (field_id = 7; field_id <= 11; field_id++) {
+			rqseq = s_rqseq;
+			IPMB_Build_GetBoardIdentityField(&pkt, target_addr, IPMB_WEB_HOST_ADDR_7BIT, rqseq, field_id);
+			s_rqseq = (uint8_t)((s_rqseq + 1) & 0x3F);
+			if (slot_poll_send_wait(&pkt, &rsp, rqseq))
+				Ipmb_SlotCache_StoreCustomField(slot, field_id, &rsp);
+			else
+				all_ok = 0;
+		}
+		if (all_ok) slot->custom_valid = 1;
+	}
+
 	/* Get Slot 改成跟 Board Status 一样每轮都查,实时反映槽位号/GA 引脚状态
 	 * (原来只在第一次发现时读一次,物理换槽位后网页会长期显示旧值) */
 	rqseq = s_rqseq;

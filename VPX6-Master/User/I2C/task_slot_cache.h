@@ -77,6 +77,20 @@ typedef struct {
 	uint8_t  slot_valid;
 	uint8_t  slot_readback;
 
+	/* 板卡身份信息 field_id 7~11(2026-08-20新增,Get/Set Board Identity 0x17/0x18)——
+	 * CPU型号/内存容量/主板型号/序列号/OS版本5个自定义文本字段,存在从机EEPROM里,静态数据,
+	 * 只读一次(跟 devid_valid 同样的门槛,见 task_slot_poll.c)。field_id 0~6(原来
+	 * Get Device ID 里那7个字段)现在也可写了,但读取路径不变,仍然复用上面
+	 * devid_valid/device_id/.../product_id 这些既有字段,不需要额外缓存。
+	 * os_version_text(field_id 11)跟 board_status 里真实的 os_version 协议字节
+	 * (恒为0xFF占位符,未改动)没有关系,只是网页选择把它展示在"系统状态"卡片里。 */
+	uint8_t  custom_valid;
+	char     cpu_model[64];
+	char     mem_size[64];
+	char     board_model[64];
+	char     serial_number[64];
+	char     os_version_text[64];
+
 	/* Get Sensor Reading(2Dh) x7,见 指令.txt⑤节 */
 	IpmbSensorCache_t sensors[IPMB_SLOT_SENSOR_COUNT];
 
@@ -105,6 +119,10 @@ void Ipmb_SlotCache_StoreDeviceID(IpmbSlotCache_t *slot, const ipmb_pkt_t *rsp);
 void Ipmb_SlotCache_StoreBoardStatus(IpmbSlotCache_t *slot, const ipmb_pkt_t *rsp);
 void Ipmb_SlotCache_StoreSlotReadback(IpmbSlotCache_t *slot, const ipmb_pkt_t *rsp);
 void Ipmb_SlotCache_StoreSensor(IpmbSlotCache_t *slot, uint8_t sensor_num, const ipmb_pkt_t *rsp);
+
+/* 存一个板卡身份文本字段(field_id 7~10),rsp 是 Get Board Identity Field 的完整响应帧。
+ * 完成码非0/长度不够/field_id对不上时不覆盖旧值,同上面几个 Store 函数的既有约定 */
+void Ipmb_SlotCache_StoreCustomField(IpmbSlotCache_t *slot, uint8_t field_id, const ipmb_pkt_t *rsp);
 
 /* 存一条 PEM 事件(主动上报或轮询答复都能用),addr=帧里的源从机地址(pem->buf[3]);
  * 找不到对应槽位缓存条目(地址还没被 Get Device ID 等命令 FindOrAlloc 过)时按 addr 现分配一个 */

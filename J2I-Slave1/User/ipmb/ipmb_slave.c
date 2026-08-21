@@ -6,6 +6,7 @@
 #include ".\timer\bsp_pwm.h"
 #include ".\gpio\bsp_gpio.h"
 #include ".\i2c\bsp_eeprom.h"  /* g_runtime_total_minutes, 见 IPMB_Slave_Handle_GetBoardStatus */
+#include "ipmb_board_identity.h"  /* g_board_identity, 见 IPMB_Slave_Handle_GetDeviceID/GetBoardIdentity/SetBoardIdentity */
 #include <string.h>
 #include <stdio.h>
 
@@ -109,21 +110,25 @@ void IPMB_Slave_Handle_GetDeviceID(const uint8_t* req, uint8_t req_len,
     uint8_t data[11];
     (void)req_len;
 
-    data[0]  = g_slave_device_id.device_id;        /* Device ID (0x8E) */
-    data[1]  = g_slave_device_id.device_revision;  /* 硬件版本 */
-    data[2]  = g_slave_device_id.firmware_rev1;    /* 固件版本1 */
+    /* 【2026-08-20改】这7个字段原来读 g_slave_device_id(编译期写死的常量),现在改读
+     * g_board_identity(ipmb_board_identity.c,EEPROM持久化、可通过新增的
+     * Set Board Identity(0x18)命令改写)。field_id 0~4/5/6 分别对应下面这几行,
+     * 跟 ipmb_board_identity.h 里的字段描述表逐一对应。未配置过时 g_board_identity
+     * 已经在 BoardIdentity_Init() 里回退成跟这里改动前完全相同的默认值,行为不变。 */
+    data[0]  = g_board_identity.device_id;          /* field_id 0 */
+    data[1]  = g_board_identity.hw_revision;        /* field_id 1 */
+    data[2]  = g_board_identity.fw_major_rev;       /* field_id 2 */
     data[3]  = g_fru_state.ipmc_version;    /* 固件版本2 (IPMC BCD) —— 2026-07-29改成跟 Get Board Status
                                               * 的固件版本字段共用同一个变量 g_fru_state.ipmc_version,
-                                              * 不再读 g_slave_device_id.firmware_rev2 这个独立常量;
-                                              * "设置IPMC版本"(control_req=0x09)执行后,Get Device ID
-                                              * 和 Get Board Status 两处现在会同时反映新值 */
-    data[4]  = g_slave_device_id.ipmi_version;     /* 0x51 */
-    data[5]  = g_slave_device_id.additional_support;/* 0x23 IPMC */
-    data[6]  = g_slave_device_id.manufacturer_id[0]; /* 低字节在前 */
-    data[7]  = g_slave_device_id.manufacturer_id[1];
-    data[8]  = g_slave_device_id.manufacturer_id[2];
-    data[9]  = g_slave_device_id.product_id & 0xFF;  /* 低字节在前 */
-    data[10] = (g_slave_device_id.product_id >> 8) & 0xFF;
+                                              * 走既有的"设置IPMC版本"(control_req=0x09)写入路径,
+                                              * 不归 g_board_identity 管 */
+    data[4]  = g_board_identity.ipmi_version;       /* field_id 3 */
+    data[5]  = g_board_identity.device_support;     /* field_id 4 */
+    data[6]  = g_board_identity.mfg_id[0];          /* field_id 5,低字节在前 */
+    data[7]  = g_board_identity.mfg_id[1];
+    data[8]  = g_board_identity.mfg_id[2];
+    data[9]  = g_board_identity.product_id[0];      /* field_id 6,低字节在前 */
+    data[10] = g_board_identity.product_id[1];
 
     *resp_len = IPMB_Build_Response(resp, rqSA, IPMB_NETFN_APP, rqLun,
                                      own_addr, rqSeq, IPMB_CMD_GET_DEVICE_ID,
@@ -426,6 +431,86 @@ void IPMB_Slave_Handle_SetFRUActivation(const uint8_t* req, uint8_t req_len,
 }
 
 /**
+ * @brief  Get Board Identity Field(0x17,2026-08-20新增)—— 按 field_id(0~11)取一个板卡
+ *         身份字段的当前值,详见 ipmb_board_identity.h。请求 data[0]=field_id;响应
+ *         data[0]=field_id(回显)、data[1]=value_len、data[2..]=原始字节/文本内容
+ *         (不含结尾'\0')。总数据字节数(帧布局见 ipmb_protocol.h 头注释)至少要有1个
+ *         (field_id 本身),即 req_len >= 8。
+ */
+void IPMB_Slave_Handle_GetBoardIdentity(const uint8_t* req, uint8_t req_len,
+                                          uint8_t* resp, uint8_t* resp_len,
+                                          uint8_t own_addr)
+{
+    uint8_t rqSA  = req[3];
+    uint8_t rqLun = IPMB_Extract_RqLun(req);
+    uint8_t rqSeq = IPMB_Extract_RqSeq(req);
+    uint8_t data[2 + IPMB_BOARD_IDENTITY_TEXT_MAX];
+    uint8_t val_len = 0;
+    uint8_t cc;
+
+    if (req_len < 8) {
+        cc = IPMB_CC_INVALID_DATA_FIELD;
+        data[0] = 0;
+        data[1] = 0;
+    } else {
+        uint8_t field_id = req[6];
+        data[0] = field_id;
+        if (BoardIdentity_GetField(field_id, &data[2], &val_len)) {
+            data[1] = val_len;
+            cc = IPMB_CC_OK;
+        } else {
+            data[1] = 0;
+            val_len = 0;
+            cc = IPMB_CC_INVALID_DATA_FIELD;
+        }
+    }
+
+    *resp_len = IPMB_Build_Response(resp, rqSA, IPMB_NETFN_APP, rqLun,
+                                     own_addr, rqSeq, IPMB_CMD_GET_BOARD_IDENTITY,
+                                     cc, data, (uint8_t)(2 + val_len));
+}
+
+/**
+ * @brief  Set Board Identity Field(0x18,2026-08-20新增)—— 按 field_id(0~11)写一个板卡
+ *         身份字段,立即持久化进 EEPROM(见 BoardIdentity_SetField)。请求
+ *         data[0]=field_id, data[1]=value_len, data[2..]=待写值。总数据字节数
+ *         至少要有2个(field_id+value_len 这两个固定字段),即 req_len >= 9;
+ *         实际可读的值字节数 = req_len-9,必须 >= 声明的 value_len 才认为合法
+ *         (帧布局推导见 ipmb_protocol.h 头注释:总数据长度 N = req_len-7)。
+ */
+void IPMB_Slave_Handle_SetBoardIdentity(const uint8_t* req, uint8_t req_len,
+                                          uint8_t* resp, uint8_t* resp_len,
+                                          uint8_t own_addr)
+{
+    uint8_t rqSA  = req[3];
+    uint8_t rqLun = IPMB_Extract_RqLun(req);
+    uint8_t rqSeq = IPMB_Extract_RqSeq(req);
+    uint8_t cc;
+    uint8_t data[1];
+    uint8_t field_id = 0;
+
+    if (req_len < 9) {
+        cc = IPMB_CC_INVALID_DATA_FIELD;
+    } else {
+        uint8_t value_len = req[7];
+        uint8_t avail = (uint8_t)(req_len - 9);
+        field_id = req[6];
+        if (value_len > avail) {
+            cc = IPMB_CC_INVALID_DATA_FIELD;
+        } else if (BoardIdentity_SetField(field_id, &req[8], value_len) == 0) {
+            cc = IPMB_CC_OK;
+        } else {
+            cc = IPMB_CC_INVALID_DATA_FIELD;
+        }
+    }
+    data[0] = field_id;
+
+    *resp_len = IPMB_Build_Response(resp, rqSA, IPMB_NETFN_APP, rqLun,
+                                     own_addr, rqSeq, IPMB_CMD_SET_BOARD_IDENTITY,
+                                     cc, data, sizeof(data));
+}
+
+/**
  * @brief  Platform Event Message(cmd=0x02)—— 拼帧逻辑本身不区分调用来源,
  *         现在有两条触发路径共用这一个函数:
  *           1) 轮询答复:F407 每 5s 发一条 cmd=0x02 请求,经
@@ -711,6 +796,12 @@ uint8_t IPMB_Slave_ProcessRequest(const uint8_t* rx_buf, uint8_t rx_len,
         break;
     case IPMB_CMD_GET_MODULE_INFO:
         IPMB_Slave_Handle_GetModuleInfo(rx_buf, rx_len, tx_buf, &resp_len, own_addr);
+        break;
+    case IPMB_CMD_GET_BOARD_IDENTITY:
+        IPMB_Slave_Handle_GetBoardIdentity(rx_buf, rx_len, tx_buf, &resp_len, own_addr);
+        break;
+    case IPMB_CMD_SET_BOARD_IDENTITY:
+        IPMB_Slave_Handle_SetBoardIdentity(rx_buf, rx_len, tx_buf, &resp_len, own_addr);
         break;
     default:
         {

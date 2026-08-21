@@ -137,6 +137,13 @@ uint8_t IPMB_FRU_HandleControl(uint8_t control_req, const uint8_t* data, uint8_t
         printf("[FRU] IPMC version=0x%02X\r\n", g_fru_state.ipmc_version);
         return 0;
 
+    case 0x0A:  /* 恢复温控自动模式 —— 清除风扇手动覆盖标志,之后两路风扇转速重新由
+                 * CPU温度自动计算(Fan_ComputeAutoDuty),见 task_fan.c。跟 UART4 的
+                 * "Fan auto" 调试命令调的是同一个函数 */
+        Fan_ClearManualOverride();
+        printf("[FRU] Fan manual override cleared, resuming auto temp control\r\n");
+        return 0;
+
     case 0x10:  /* 设置 I2C 通讯速率 100Kbps (协议控制码 10h)
                  * 只写pending,不直接改g_ipmb_i2c_speed——这次响应本身还要按当前速率
                  * 发出去,真正提交在 task_ipmb.c 里这次收发彻底结束之后 */

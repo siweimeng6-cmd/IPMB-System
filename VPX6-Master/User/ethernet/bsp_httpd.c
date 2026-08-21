@@ -18,6 +18,12 @@
 *	                                    body: {"control_req":N} 或 {"action":"power_on"},
 *	                                    需要额外数据的 control_req(0x07/0x08/0x09)再加
 *	                                    {"value":N};立即返回202+ticket,不等IPMB往返完成
+*	  POST /api/v1/slots/{n}/identity - 写入一个板卡身份字段(2026-08-20新增,field_id 0~10,
+*	                                    见 task_slot_cache.h 顶部注释),body: {"field_id":N,
+*	                                    "value":V};field_id 0~4 的 value 是 0~255 整数,
+*	                                    5~6(厂家ID/产品ID)是十六进制字符串(3/2字节),
+*	                                    7~10(自定义文本字段)是普通文本(≤31字符);
+*	                                    同样立即返回202+ticket,复用同一套 ticket 机制
 *	  GET  /api/v1/tickets/{n}        - 轮询上面某个 ticket 的执行结果
 *	  OPTIONS *                       - CORS 预检
 *	注    意: 每条 HTTP/1.0 请求都是一条新连接(Connection: close,无keep-alive/管线化),
@@ -172,6 +178,32 @@ static void http_format_sensor_value(char *buf, uint8_t sensor_num, int16_t raw)
 		sprintf(buf, "%d.%02d", whole, frac);
 }
 
+/* 【2026-08-20新增】把一个以'\0'结尾的字符串按 JSON 语法转义写进 out(转义引号/反斜杠/
+ * ASCII控制字符,不做完整Unicode处理——自定义文本字段本来就只允许可打印ASCII,见从机
+ * BoardIdentity_SetField 的校验,这里只是兜底防御)。in 为 NULL 或空串时 out 写成空串。
+ * 返回写入的字节数(不含结尾'\0')。 */
+static uint16_t http_json_escape_str(char *out, uint16_t out_cap, const char *in)
+{
+	uint16_t j = 0;
+	if (in == NULL) { out[0] = '\0'; return 0; }
+	while (*in != '\0' && (uint16_t)(j + 1) < out_cap) {
+		unsigned char c = (unsigned char)*in;
+		if (c == '\"' || c == '\\') {
+			if ((uint16_t)(j + 2) >= out_cap) break;
+			out[j++] = '\\';
+			out[j++] = (char)c;
+		} else if (c < 0x20) {
+			if ((uint16_t)(j + 6) >= out_cap) break;
+			j += (uint16_t)sprintf(&out[j], "\\u%04x", (unsigned)c);
+		} else {
+			out[j++] = (char)c;
+		}
+		in++;
+	}
+	out[j] = '\0';
+	return j;
+}
+
 /* 【2026-07-28新增】见 指令.txt①节:device support 是固定值查表(93h=机箱管理CMHC,
  * 23h=功能板IPMC),不是位域,原样十进制显示没有意义,查表转成文字。 */
 static const char* http_device_support_label(uint8_t v)
@@ -267,10 +299,30 @@ static void handle_slot_detail(struct tcp_pcb *pcb, uint8_t slot_id)
 
 	/* 见 指令.txt⑦节:从机侧传感器编号字段固定00h,PEM 只反映全局系统状态变化 */
 	len += (uint16_t)sprintf(s_httpRespBuf + len,
-		"\"pem\":{\"valid\":%u,\"threshold_exceeded\":%u,\"sys_state\":%u,\"cause\":%u,\"age_ms\":%u}}",
+		"\"pem\":{\"valid\":%u,\"threshold_exceeded\":%u,\"sys_state\":%u,\"cause\":%u,\"age_ms\":%u},",
 		(unsigned)slot->pem_valid, (unsigned)slot->pem_threshold_exceeded,
 		(unsigned)slot->pem_sys_state, (unsigned)slot->pem_cause,
 		(unsigned)((now - slot->pem_last_tick) * portTICK_PERIOD_MS));
+
+	/* 板卡身份信息 field_id 7~11(2026-08-20新增,见 task_slot_cache.h):自定义文本字段,
+	 * 用户自由输入,过 http_json_escape_str 转义后再拼进 JSON,防止内容里的双引号/
+	 * 反斜杠/控制字符打断格式(从机 BoardIdentity_SetField 已经只允许可打印ASCII,
+	 * 这里是第二层防御,兜住其它来源写入的旧数据/非常规字节)。os_version_text
+	 * (field_id 11)跟真实的 board_status.os_version 协议字节没有关系,网页选择把它
+	 * 展示在"系统状态"卡片里,这里只是原样透传。 */
+	{
+		char cpu_model_esc[96], mem_size_esc[96], board_model_esc[96], serial_number_esc[96], os_version_esc[96];
+		http_json_escape_str(cpu_model_esc, sizeof(cpu_model_esc), slot->cpu_model);
+		http_json_escape_str(mem_size_esc, sizeof(mem_size_esc), slot->mem_size);
+		http_json_escape_str(board_model_esc, sizeof(board_model_esc), slot->board_model);
+		http_json_escape_str(serial_number_esc, sizeof(serial_number_esc), slot->serial_number);
+		http_json_escape_str(os_version_esc, sizeof(os_version_esc), slot->os_version_text);
+		len += (uint16_t)sprintf(s_httpRespBuf + len,
+			"\"custom_fields\":{\"valid\":%u,\"cpu_model\":\"%s\",\"mem_size\":\"%s\","
+			"\"board_model\":\"%s\",\"serial_number\":\"%s\",\"os_version_text\":\"%s\"}}",
+			(unsigned)slot->custom_valid, cpu_model_esc, mem_size_esc, board_model_esc,
+			serial_number_esc, os_version_esc);
+	}
 
 	http_send_and_close(pcb, len);
 }
@@ -335,6 +387,7 @@ static const CtrlActionMap_t s_ctrl_actions[] = {
 	{"set_threshold_exceeded", 0x05}, {"set_threshold_normal", 0x06},
 	{"set_fan_default_level", 0x07}, {"set_fan_max_rpm", 0x08},
 	{"set_ipmc_version", 0x09},
+	{"resume_temp_control", 0x0A},
 	{"set_i2c_speed_100k", 0x10}, {"set_i2c_speed_400k", 0x11},
 };
 
@@ -378,7 +431,16 @@ static uint8_t http_json_find_str(const char *body, const char *key, char *out, 
 	if (*p != '\"') return 0;
 	p++;
 	j = 0;
-	while (*p != '\"' && *p != '\0' && (uint16_t)(j + 1) < out_cap) out[j++] = *p++;
+	/* 【2026-08-20】遇到反斜杠时,原样多拷贝一个字符再继续——不做完整JSON反转义,
+	 * 只是不让被转义的引号(\")误判成字符串结束。这里新增的自定义文本字段(CPU型号等)
+	 * 是用户自由输入,含引号是完全合理的输入,原来的实现会在第一个 \" 处截断,
+	 * 静默存错值(action 字段从没暴露过这个问题,因为动作名是固定枚举,从不含引号)。 */
+	while (*p != '\"' && *p != '\0' && (uint16_t)(j + 1) < out_cap) {
+		if (*p == '\\' && p[1] != '\0' && (uint16_t)(j + 2) < out_cap) {
+			out[j++] = *p++;
+		}
+		out[j++] = *p++;
+	}
 	out[j] = '\0';
 	return (j > 0) ? 1 : 0;
 }
@@ -457,6 +519,120 @@ static void handle_slot_control(struct tcp_pcb *pcb, uint8_t slot_id, const char
 		len += (uint16_t)sprintf(s_httpRespBuf + len,
 			"{\"ticket\":%u,\"slot_id\":%u,\"control_req\":%u}",
 			(unsigned)ticket, (unsigned)slot_id, (unsigned)control_req);
+	http_send_and_close(pcb, len);
+}
+
+/* 把 s(以'\0'结尾)开头恰好 out_len*2 个十六进制字符解析成 out_len 个字节;
+ * 长度不对(太短/太长)、出现非十六进制字符都返回0失败,不写 out */
+static uint8_t http_parse_hex_bytes(const char *s, uint8_t *out, uint8_t out_len)
+{
+	uint8_t i;
+	for (i = 0; i < out_len; i++) {
+		uint8_t hi, lo;
+		char c1 = s[i * 2], c2 = s[i * 2 + 1];
+		if (c1 >= '0' && c1 <= '9') hi = (uint8_t)(c1 - '0');
+		else if (c1 >= 'A' && c1 <= 'F') hi = (uint8_t)(c1 - 'A' + 10);
+		else if (c1 >= 'a' && c1 <= 'f') hi = (uint8_t)(c1 - 'a' + 10);
+		else return 0;
+		if (c2 >= '0' && c2 <= '9') lo = (uint8_t)(c2 - '0');
+		else if (c2 >= 'A' && c2 <= 'F') lo = (uint8_t)(c2 - 'A' + 10);
+		else if (c2 >= 'a' && c2 <= 'f') lo = (uint8_t)(c2 - 'a' + 10);
+		else return 0;
+		out[i] = (uint8_t)((hi << 4) | lo);
+	}
+	if (s[(uint16_t)out_len * 2] != '\0') return 0;   /* 多余字符,长度不对 */
+	return 1;
+}
+
+/*
+*********************************************************************************************************
+*	函 数 名: handle_slot_identity_set
+*	功能说明: POST /api/v1/slots/{n}/identity(2026-08-20新增)——流程完全比照
+*	          handle_slot_control:解析 body → Ipmb_BoardIdentity_Submit → 202+ticket,
+*	          不等 IPMB 往返完成。body 里 value 的 JSON 类型按 field_id 分三种:
+*	          0~4(数值字段)是整数,5~6(厂家ID/产品ID)是十六进制字符串,
+*	          7~11(自定义文本字段,UTF-8,最长63字节)是普通文本,见 task_slot_cache.h 顶部注释。
+*********************************************************************************************************
+*/
+static void handle_slot_identity_set(struct tcp_pcb *pcb, uint8_t slot_id, const char *body)
+{
+	IpmbSlotCache_t *slot = Ipmb_SlotCache_FindBySlotId(slot_id);
+	uint16_t len;
+	uint32_t field_id_val;
+	uint8_t field_id;
+	uint8_t data[64];
+	uint8_t data_len = 0;
+	uint16_t ticket;
+
+	if (slot == NULL) {
+		len = http_write_headers(s_httpRespBuf, 404, "Not Found", "application/json");
+		len += (uint16_t)sprintf(s_httpRespBuf + len, "{\"error\":\"slot %u not online\"}", (unsigned)slot_id);
+		http_send_and_close(pcb, len);
+		return;
+	}
+
+	if (!http_json_find_uint(body, "\"field_id\"", &field_id_val) || field_id_val > 11) {
+		len = http_write_headers(s_httpRespBuf, 400, "Bad Request", "application/json");
+		len += (uint16_t)sprintf(s_httpRespBuf + len, "{\"error\":\"missing/invalid field_id (0-11)\"}");
+		http_send_and_close(pcb, len);
+		return;
+	}
+	field_id = (uint8_t)field_id_val;
+
+	if (field_id <= 4) {
+		uint32_t v;
+		if (!http_json_find_uint(body, "\"value\"", &v) || v > 255) {
+			len = http_write_headers(s_httpRespBuf, 400, "Bad Request", "application/json");
+			len += (uint16_t)sprintf(s_httpRespBuf + len, "{\"error\":\"value must be an integer 0-255\"}");
+			http_send_and_close(pcb, len);
+			return;
+		}
+		data[0] = (uint8_t)v;
+		data_len = 1;
+	} else if (field_id == 5 || field_id == 6) {
+		char hex[16];
+		uint8_t want_len = (field_id == 5) ? 3 : 2;   /* 5=厂家ID(3字节) 6=产品ID(2字节) */
+		if (!http_json_find_str(body, "\"value\"", hex, sizeof(hex)) ||
+		    !http_parse_hex_bytes(hex, data, want_len)) {
+			len = http_write_headers(s_httpRespBuf, 400, "Bad Request", "application/json");
+			len += (uint16_t)sprintf(s_httpRespBuf + len,
+				"{\"error\":\"value must be a %u-byte hex string\"}", (unsigned)want_len);
+			http_send_and_close(pcb, len);
+			return;
+		}
+		data_len = want_len;
+	} else {
+		char text[72];
+		uint16_t text_len;
+		if (!http_json_find_str(body, "\"value\"", text, sizeof(text))) {
+			len = http_write_headers(s_httpRespBuf, 400, "Bad Request", "application/json");
+			len += (uint16_t)sprintf(s_httpRespBuf + len, "{\"error\":\"value must be text\"}");
+			http_send_and_close(pcb, len);
+			return;
+		}
+		text_len = (uint16_t)strlen(text);
+		if (text_len > 63) {
+			len = http_write_headers(s_httpRespBuf, 400, "Bad Request", "application/json");
+			len += (uint16_t)sprintf(s_httpRespBuf + len, "{\"error\":\"value too long, max 63 bytes\"}");
+			http_send_and_close(pcb, len);
+			return;
+		}
+		data_len = (uint8_t)text_len;
+		memcpy(data, text, data_len);
+	}
+
+	ticket = Ipmb_BoardIdentity_Submit(slot->addr, field_id, data, data_len);
+	if (ticket == 0) {
+		len = http_write_headers(s_httpRespBuf, 503, "Service Unavailable", "application/json");
+		len += (uint16_t)sprintf(s_httpRespBuf + len, "{\"error\":\"control queue full, retry later\"}");
+		http_send_and_close(pcb, len);
+		return;
+	}
+
+	len = http_write_headers(s_httpRespBuf, 202, "Accepted", "application/json");
+	len += (uint16_t)sprintf(s_httpRespBuf + len,
+		"{\"ticket\":%u,\"slot_id\":%u,\"field_id\":%u}",
+		(unsigned)ticket, (unsigned)slot_id, (unsigned)field_id);
 	http_send_and_close(pcb, len);
 }
 
@@ -618,10 +794,18 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err
 		if (strncmp(path, "/api/v1/slots/", 14) == 0)
 		{
 			rest = path + 14;
-			if (http_parse_slot_id(rest, &slot_id, &rest) && strcmp(rest, "/control") == 0)
+			if (http_parse_slot_id(rest, &slot_id, &rest))
 			{
-				handle_slot_control(pcb, slot_id, body);
-				return ERR_OK;
+				if (strcmp(rest, "/control") == 0)
+				{
+					handle_slot_control(pcb, slot_id, body);
+					return ERR_OK;
+				}
+				if (strcmp(rest, "/identity") == 0)
+				{
+					handle_slot_identity_set(pcb, slot_id, body);
+					return ERR_OK;
+				}
 			}
 		}
 		handle_not_found(pcb);
