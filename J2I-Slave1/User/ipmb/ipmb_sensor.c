@@ -202,14 +202,19 @@ void IPMB_Sensor_CheckThresholds(void)
     if (s_temp_shutdown_persist >= IPMB_THRESHOLD_SHUTDOWN_PERSIST_ROUNDS ||
         s_volt_shutdown_persist >= IPMB_THRESHOLD_SHUTDOWN_PERSIST_ROUNDS)
     {
-        /* 断电动作本身照抄 ipmb_fru.c case 0x00,但cause改成SHUTDOWN_THRESHOLD而不是
-         * USER_REQUEST,所以不直接复用 IPMB_FRU_HandleControl(0x00,...);顺带
+        /* 断电动作本身照抄 ipmb_fru.c case 0x00,但两处故意不一样:cause改成
+         * SHUTDOWN_THRESHOLD而不是USER_REQUEST(所以不直接复用
+         * IPMB_FRU_HandleControl(0x00,...));sys_state改成M6(关键故障)而不是
+         * case 0x00那样的M0(2026-08-21改,原来跟人为断电一样设M0,会跟同一屏的
+         * "报警中"/"阈值触发断电"放一起显示成自相矛盾的"正常",改成M6后网页能
+         * 一眼看出这是异常断电,不用非得去看原因码那一行)。手动重新上电
+         * (ipmb_fru.c case 0x01)会把sys_state重置回M0。顺带
          * g_pem_event_seq++ 保证这次断电对主控可见(现有case 0x00本身不会推PEM)。
          * 这几个共享状态目前项目里没有锁保护(既有的潜在竞态),这里是第4个写者,
          * 加临界区保护,降低无人值守断电场景下的风险。 */
         taskENTER_CRITICAL();
         g_fru_state.prev_sys_state = g_fru_state.sys_state;
-        g_fru_state.sys_state = IPMB_STATE_M0;
+        g_fru_state.sys_state = IPMB_STATE_M6;
         g_fru_state.cause = IPMB_CAUSE_SHUTDOWN_THRESHOLD;
         g_fru_state.power_state = 0;
         g_fru_state.threshold_exceeded = 1;
