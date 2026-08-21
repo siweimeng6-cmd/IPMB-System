@@ -237,7 +237,7 @@
     <input type="text" id="baseUrlInput" placeholder="192.168.100.20">
   </div>
   <span id="connBadge" class="badge bad"><span class="dot"></span>离线</span>
-  <button class="btn" id="identityViewBtn" style="margin-left:8px">设置</button>
+  <button class="btn" id="identityViewBtn" style="margin-left:8px">板卡信息设置</button>
   <button class="btn" id="thresholdViewBtn" style="margin-left:8px">阈值设置</button>
   <div class="spacer"></div>
   <span id="healthMeta" class="meta"></span>
@@ -395,6 +395,18 @@
     if (ms < 1000) return ms + 'ms';
     if (ms < 60000) return (ms / 1000).toFixed(1) + 's';
     return Math.floor(ms / 60000) + 'min';
+  }
+
+  // PEM 卡片("主动上报信息")的系统状态/原因码翻译成中文,跟从机 ipmb_fru.h 的
+  // IPMB_SystemState_t/IPMB_StateChangeCause_t 两个枚举一一对应(2026-08-21新增)。
+  // 原始编码保留在括号里,方便对照协议/排查问题,不丢信息。
+  var SYS_STATE_TEXT = { 0: '正常', 1: '暂时性故障', 4: '严重故障(CPU不在位)', 6: '关键故障', 7: '不可恢复' };
+  var CAUSE_TEXT = { 0: '正常', 1: '阈值超上限', 2: '阈值超下限', 3: '上电', 4: '复位', 5: '人为操作', 6: '阈值触发断电' };
+  function fmtSysState(n) {
+    return (SYS_STATE_TEXT[n] !== undefined ? SYS_STATE_TEXT[n] : '未知') + ' (M' + n + ')';
+  }
+  function fmtCause(n) {
+    return (CAUSE_TEXT[n] !== undefined ? CAUSE_TEXT[n] : '未知') + ' (' + n + ')';
   }
 
   // ---------- health ----------
@@ -775,9 +787,9 @@
       '</dl></div>';
 
     html += '<div class="card"><h3>主动上报信息' + validBadge(pem.valid) + '</h3><dl class="kv">' +
-      kv('阈值超限', pem.threshold_exceeded) +
-      kv('系统状态', 'M' + pem.sys_state) +
-      kv('原因码', pem.cause) +
+      kv('阈值超限', pem.threshold_exceeded ? '报警中' : '正常') +
+      kv('系统状态', fmtSysState(pem.sys_state)) +
+      kv('原因码', fmtCause(pem.cause)) +
       kv('距今', fmtAge(pem.age_ms)) +
       '</dl></div>';
 
