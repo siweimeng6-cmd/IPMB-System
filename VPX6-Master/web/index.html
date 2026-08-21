@@ -448,8 +448,7 @@
       kv('开关机状态', bs.power_state ? '开机' : '关机') +
       kv('CPU在位', bs.cpu_present === 255 ? '未使用' : bs.cpu_present) +
       kv('自检结果', bs.self_test) +
-      kv('CPU利用率', bs.cpu_util === 65535 ? '未使用' : bs.cpu_util) +
-      kv('内存利用率', bs.mem_util === 65535 ? '未使用' : bs.mem_util) +
+      kv('累计运行时间', bs.cpu_util === 65535 ? '未使用' : (bs.cpu_util + '小时' + bs.mem_util + '分钟')) +
       kv('带宽1', bs.bw1 === 65535 ? '未使用' : bs.bw1) +
       kv('带宽2', bs.bw2 === 65535 ? '未使用' : bs.bw2) +
       kv('CPU温度(C)', bs.cpu_temp_valid ? bs.cpu_temp_c : '未使用') +

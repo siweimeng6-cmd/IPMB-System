@@ -1,6 +1,7 @@
 #include "rtos_task.h"
 #include "bsp_init.h"
 #include ".\\gpio\\bsp_gpio.h"
+#include ".\\i2c\\bsp_eeprom.h"
 #include "task_fw_update.h"
 #include <stdlib.h>   /* strtof()，用于解析主机上报的"CPU_TEMP="温度参数 */
 
@@ -85,6 +86,16 @@ void Sensor_Task(void* parameter)
 				strcat((char *)stPrintf_Buf.buf, cpu_temp_buf);
 			}
 		}
+
+		#if MO_IIC
+		/* 【2026-08-20移植自BPCOME-3502】累计运行时长:只走本地debug串口,不进
+		 * stPrintf_Buf/stCpu_Buf——那条路径会在主机发'?'查询时把内容转发给主机,
+		 * 这个字段目前只是本地调试信息,不对外暴露 */
+		Runtime_Task_Update();
+		printf("[RUNTIME] 累计运行时间: %u小时%u分钟(距下次写入EEPROM还剩%u分钟)\r\n",
+			(unsigned int)(g_runtime_total_minutes / 60), (unsigned int)(g_runtime_total_minutes % 60),
+			(unsigned int)g_runtime_countdown_minutes);
+		#endif
 
 		stPrintf_Buf.size = strlen((char *)stPrintf_Buf.buf);
 		printf("\r\n");

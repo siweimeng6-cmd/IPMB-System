@@ -5,6 +5,7 @@
 #include "bsp_bpd20550.h"  /* g_bpd20550_current_A: 12V 输入电流(PMBus, PB8/PB9) */
 #include ".\timer\bsp_pwm.h"
 #include ".\gpio\bsp_gpio.h"
+#include ".\i2c\bsp_eeprom.h"  /* g_runtime_total_minutes, 见 IPMB_Slave_Handle_GetBoardStatus */
 #include <string.h>
 #include <stdio.h>
 
@@ -321,10 +322,13 @@ void IPMB_Slave_Handle_GetBoardStatus(const uint8_t* req, uint8_t req_len,
     /* 按需求文档布局:
      *   [0] CPU 在位
      *   [1] 自检结果
-     *   [2..3] CPU 利用率 (LE)
-     *   [4..5] 内存利用率 (LE)
-     *   [6..7] 带宽1 (LE)
-     *   [8..9] 带宽2 (LE)
+     *   [2..3] 【2026-08-20借用】原"CPU利用率"字段,F103拿不到主机CPU利用率,
+     *          恒为占位符0xFFFF,故借来存"累计运行小时数"(LE,见 bsp_eeprom.c
+     *          的 g_runtime_total_minutes/Runtime_Task_Update)
+     *   [4..5] 【2026-08-20借用】原"内存利用率"字段,同上理由,借来存
+     *          "分钟余数0-59"(LE),两个字段合起来在网页拼成"XX小时YY分钟"
+     *   [6..7] 带宽1 (LE) —— 仍是占位符,未借用
+     *   [8..9] 带宽2 (LE) —— 仍是占位符,未借用
      *   [10] CPU 温度 (实际+128) —— 2026-08-18改为主机经串口上报的真实CPU温度
      *   [11] OS 版本
      *   [12] FW 版本
@@ -332,8 +336,18 @@ void IPMB_Slave_Handle_GetBoardStatus(const uint8_t* req, uint8_t req_len,
      */
     data[0]  = 0xFF;        /* CPU 在位: 未检测 (F103 测不到 CPU) */
     data[1]  = 0x01;        /* 自检: 通过 */
-    data[2]  = 0xFF; data[3] = 0xFF;  /* CPU% */
-    data[4]  = 0xFF; data[5] = 0xFF;  /* 内存% */
+    {
+        /* g_runtime_total_minutes 是 uint32_t 永不溢出,但这里只有16位可用。
+         * 65535 是这套协议里"未使用"的保留哨兵(网页按 cpu_util===65535 特判),
+         * 真实小时数一旦达到65535(约7.48年)会跟这个哨兵撞车、被误显示成
+         * "未使用",继续用uint16_t强转还会绕回0导致"累计"时长看起来归零。
+         * 封顶在65534,超过后停住不再增长,不撞哨兵、不回绕。 */
+        uint32_t total_hours = g_runtime_total_minutes / 60;
+        uint16_t rt_hours = (total_hours > 65534u) ? (uint16_t)65534u : (uint16_t)total_hours;
+        uint16_t rt_mins  = (uint16_t)(g_runtime_total_minutes % 60);
+        data[2] = (uint8_t)(rt_hours);      data[3] = (uint8_t)(rt_hours >> 8);
+        data[4] = (uint8_t)(rt_mins);       data[5] = (uint8_t)(rt_mins >> 8);
+    }
     data[6]  = 0xFF; data[7] = 0xFF;  /* 带宽1 */
     data[8]  = 0xFF; data[9] = 0xFF;  /* 带宽2 */
     /* CPU 温度: 主机(飞腾D2000)经UART5每秒上报的真实CPU温度(即调试串口打印的

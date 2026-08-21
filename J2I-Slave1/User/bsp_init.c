@@ -78,6 +78,7 @@ void BSP_Init(void)
 	#if MO_IIC
 	Init_MO_I2C();
 	EEPROM_SelfTest();
+	Runtime_Init();
 	#else
 	Init_HARD_I2C();
 	#endif
