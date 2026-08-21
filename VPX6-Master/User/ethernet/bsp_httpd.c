@@ -284,7 +284,8 @@ static void handle_slot_detail(struct tcp_pcb *pcb, uint8_t slot_id)
 		"\"slot_readback\":{\"valid\":%u,\"slot_id\":%u},",
 		(unsigned)slot->slot_valid, (unsigned)slot->slot_readback);
 
-	/* 见 指令.txt⑤节:7个已知能读到真实值的传感器;数值编码见 http_format_sensor_value 注释 */
+	/* 见 指令.txt⑤节:11个已知能读到真实值的传感器(2026-08-21从7个扩到11个);
+	 * 数值编码见 http_format_sensor_value 注释 */
 	len += (uint16_t)sprintf(s_httpRespBuf + len, "\"sensors\":[");
 	for (i = 0; i < IPMB_SLOT_SENSOR_COUNT; i++) {
 		IpmbSensorCache_t *sn = &slot->sensors[i];

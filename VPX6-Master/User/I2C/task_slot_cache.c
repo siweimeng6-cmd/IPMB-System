@@ -4,24 +4,32 @@
 
 IpmbSlotCache_t g_slot_cache[IPMB_MAX_SLAVES] = {0};
 
-/* 7个目前接了真实硬件的传感器编号(见 指令.txt⑤节),新分配槽位时预填进
- * sensors[].sensor_num,Ipmb_SlotCache_StoreSensor 按编号线性查表匹配 */
+/* 11个目前接了真实硬件的传感器编号(见 指令.txt⑤节),新分配槽位时预填进
+ * sensors[].sensor_num,Ipmb_SlotCache_StoreSensor 按编号线性查表匹配。
+ * 2026-08-21从7个扩到11个:新增0x21(温度3)/0x16(V3.3)/0x10(V0.81-2)/0x12(V1.2),
+ * 原来0x19从"V0.75"(两路ADC平均)改名"V0.81-1"(拆开后只代表其中一路,见从机
+ * ipmb_slave.c 的说明) */
 static const uint8_t s_known_sensor_nums[IPMB_SLOT_SENSOR_COUNT] = {
-	0x04, 0x20, 0x03, 0x17, 0x19, 0x41, 0x07
+	0x04, 0x20, 0x21,                     /* 温度1/2/3 */
+	0x03, 0x17, 0x16, 0x12, 0x19, 0x10,   /* V12/V5/V3.3/V1.2/V0.81-1/V0.81-2 */
+	0x41, 0x07                            /* 风扇占空比/输出电流 */
 };
 /* 2026-07-31:中文名字改用 \x十六进制转义写原始UTF-8字节,不直接在源码里放中文字符——
  * 实测 Keil 是按 GBK 码页读这个 UTF-8 源文件的,直接写中文字符会被拆成乱码,严重时
  * (比如"风扇占空比"5字15字节是奇数,GBK两两配对到最后剩一个字节吞掉收尾引号)
  * 直接编译报错(见 task_i2c.c 同类问题的历史记录)。\x逐字节转义不管编译器按哪种
  * 码页读源文件都是原样按字节值抄进目标文件,100%绕开这个问题,网页那边收到的还是
- * 正确的UTF-8,显示不受影响。依次是"温度1"/"温度2"/"风扇占空比"/"输出电流"。 */
+ * 正确的UTF-8,显示不受影响。依次是"温度1"/"温度2"/"温度3"/"风扇占空比"/"输出电流"。 */
 static const char * const s_known_sensor_names[IPMB_SLOT_SENSOR_COUNT] = {
-	"\xe6\xb8\xa9\xe5\xba\xa6\x31", "\xe6\xb8\xa9\xe5\xba\xa6\x32", "V12", "V5", "V0.75",
+	"\xe6\xb8\xa9\xe5\xba\xa6\x31", "\xe6\xb8\xa9\xe5\xba\xa6\x32", "\xe6\xb8\xa9\xe5\xba\xa6\x33",
+	"V12", "V5", "V3.3", "V1.2", "V0.81-1", "V0.81-2",
 	"\xe9\xa3\x8e\xe6\x89\x87\xe5\x8d\xa0\xe7\xa9\xba\xe6\xaf\x94",
 	"\xe8\xbe\x93\xe5\x87\xba\xe7\x94\xb5\xe6\xb5\x81"
 };
 static const char * const s_known_sensor_units[IPMB_SLOT_SENSOR_COUNT] = {
-	"C", "C", "V", "V", "V", "%", "A"
+	"C", "C", "C",
+	"V", "V", "V", "V", "V", "V",
+	"%", "A"
 };
 
 IpmbSlotCache_t* Ipmb_SlotCache_FindOrAlloc(uint8_t addr)

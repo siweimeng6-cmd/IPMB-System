@@ -253,16 +253,28 @@ ipmb 8E 10 62 20 00 2D 04 AF
 # 温度1 (sensor 0x20, LM75A@0x92)
 ipmb 8E 10 62 20 00 2D 20 93
 
+# 温度2 (sensor 0x21, LM75A@0x94。2026-08-21新增,见 J2I-Slave1/指令.txt 同一节的详细说明)
+ipmb 8E 10 62 20 00 2D 21 92
+
 # 12V电压 (sensor 0x03, ADC PA6)
 ipmb 8E 10 62 20 00 2D 03 B0
 
 # 5V电压 (sensor 0x17, ADC PC0/VRD_MOS。2026-07-06更正:PC0实际测的是5V不是3.3V,
-# 原来错误占用sensor 0x16(协议定义3.3V)的现已改为sensor 0x17(协议定义5V);
-# 板子现阶段没有独立3.3V测点,sensor 0x16 暂无测量源)
+# 原来错误占用sensor 0x16(协议定义3.3V)的现已改为sensor 0x17(协议定义5V))
 ipmb 8E 10 62 20 00 2D 17 9C
 
-# 0.75V电压 (sensor 0x19, ADC PA7+PB0 平均)
+# 3.3V电压 (sensor 0x16, ADC PC2。2026-08-21新增,见 J2I-Slave1/指令.txt 同一节的详细说明)
+ipmb 8E 10 62 20 00 2D 16 9D
+
+# 0.81V-1电压 (sensor 0x19, ADC PC3。2026-08-21起不再跟PC4平均,拆成两路独立传感器)
 ipmb 8E 10 62 20 00 2D 19 9A
+
+# 0.81V-2电压 (sensor 0x10, ADC PC4。2026-08-21新增,原来跟0x19平均的另一半,拆开单独暴露)
+ipmb 8E 10 62 20 00 2D 10 A3
+
+# 1.2V电压 (sensor 0x12, ADC PC5。2026-08-21新增,物理含义未经硬件最终确认,
+# 见 J2I-Slave1/指令.txt 同一节的详细说明)
+ipmb 8E 10 62 20 00 2D 12 A1
 
 # 风扇档位 (sensor 0x41, PWM占空比)
 ipmb 8E 10 62 20 00 2D 41 72

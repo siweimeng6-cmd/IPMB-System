@@ -2,7 +2,7 @@
 
 int board_temp0[2]={-1,0};           //存储整数化后的实际温度值; -1表示尚未成功读取过(见Board_ADDR90_temp: I2C失败时不清零/不更新, 靠此初值让下游判"未连接")
 int board_temp1[2]={-1,0};           //存储整数化后的实际温度值; -1表示尚未成功读取过(同上, 见Board_ADDR92_temp)
-int board_temp2[2]={0x00,0x00};           //存储整数化后的实际温度值
+int board_temp2[2]={-1,0};           //存储整数化后的实际温度值; -1表示尚未成功读取过(同上, 见Board_ADDR94_temp)
 
 uint8_t board_lm75a_temp0[2]={0x00,0x00}; //温度采集数字化存储寄存器
 uint8_t board_lm75a_temp1[2]={0x00,0x00}; //温度采集数字化存储寄存器

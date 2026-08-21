@@ -1,7 +1,7 @@
 #include "ipmb_slave.h"
 #include "bsp_init.h"
 #include "bsp_adc.h"
-#include "bsp_mo_i2c.h"  /* Board_ADDR90_temp, board_temp0, board_temp1 */
+#include "bsp_mo_i2c.h"  /* Board_ADDR90/92/94_temp, board_temp0/1/2 */
 #include "bsp_bpd20550.h"  /* g_bpd20550_current_A: 12V 输入电流(PMBus, PB8/PB9) */
 #include ".\timer\bsp_pwm.h"
 #include ".\gpio\bsp_gpio.h"
@@ -273,15 +273,37 @@ void IPMB_Slave_Handle_GetSensorReading(const uint8_t* req, uint8_t req_len,
                 reading = (board_temp1[0] == -1 && board_temp1[1] == 0)
                               ? (int16_t)0x7FFF : temp_to_centi(board_temp1);
                 break;
+            case 0x21:  /* 温度 2 - LM75A @ 0x94, ×100 定点(centi-°C)。2026-08-21新增:
+                         * Board_ADDR94_temp()/board_temp2 早就在 task_usart.c 的 Sensor_Task
+                         * 里每周期跑着,只是一直没接进 Get Sensor Reading,这里补上 */
+                Board_ADDR94_temp();
+                reading = (board_temp2[0] == -1 && board_temp2[1] == 0)
+                              ? (int16_t)0x7FFF : temp_to_centi(board_temp2);
+                break;
             case 0x03:  /* 12V - PC0, ×100 定点(centi-V) */
                 reading = (int16_t)(stADC_Data.adc_voltage_val[0] * 100.0f + 0.5f);
                 break;
             case 0x17:  /* 5V - PC1/VRD_MOS (bsp_adc.c: index1 = V_5V 通道), ×100 定点(centi-V) */
                 reading = (int16_t)(stADC_Data.adc_voltage_val[1] * 100.0f + 0.5f);
                 break;
-            case 0x19:  /* 0.81V - DDRPHY 平均 (PC3+PC4, 0.81V1/0.81V2 两路), ×100 定点(centi-V) */
-                reading = (int16_t)(((stADC_Data.adc_voltage_val[3] +
-                                      stADC_Data.adc_voltage_val[4]) / 2.0f) * 100.0f + 0.5f);
+            case 0x16:  /* 3.3V - PC2(bsp_adc.c: index2 = V_3.3V 通道), ×100 定点(centi-V)。
+                         * 2026-08-21新增:这路ADC早就在采集,只是之前没有确认过的3.3V测点,
+                         * 之前一直没接进协议(指令.txt原先写"暂无测量源"),这次接上 */
+                reading = (int16_t)(stADC_Data.adc_voltage_val[2] * 100.0f + 0.5f);
+                break;
+            case 0x19:  /* 0.81V-1 - PC3(bsp_adc.c: index3), ×100 定点(centi-V)。2026-08-21起
+                         * 不再跟 index4 平均,拆成两路独立传感器(见 0x10 = 0.81V-2) */
+                reading = (int16_t)(stADC_Data.adc_voltage_val[3] * 100.0f + 0.5f);
+                break;
+            case 0x10:  /* 0.81V-2 - PC4(bsp_adc.c: index4), ×100 定点(centi-V)。2026-08-21新增:
+                         * 原来跟 index3(0x19) 平均成一路,现在拆开单独暴露 */
+                reading = (int16_t)(stADC_Data.adc_voltage_val[4] * 100.0f + 0.5f);
+                break;
+            case 0x12:  /* 1.2V - PC5(bsp_adc.c: index5), ×100 定点(centi-V)。2026-08-21新增,
+                         * 选0x12是因为 ipmb_sensor.c 预留表里这个号本来就标注"1.2V"用途。
+                         * 注意 GPIO 宏名字是 SWAP_12V_HOT(像热插拔检测脚),调试标签却写
+                         * "V_1.2V"——物理含义未经硬件最终确认,这里先按确认过的方案当电压曝光 */
+                reading = (int16_t)(stADC_Data.adc_voltage_val[5] * 100.0f + 0.5f);
                 break;
             case 0x41:  /* 风扇档位 - PWM 占空比(0-100整数,无小数意义,不缩放)
                          * 2026-07-29改用 Fan_GetCurrentDuty(FAN_CH1)(task_fan.c 新增的风扇控制任务,

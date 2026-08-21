@@ -643,13 +643,16 @@
     // sensors table
     html += '<div class="card" style="margin-bottom:16px"><h3>传感器</h3><table><thead><tr>' +
       '<th>名称</th><th>编号</th><th>数值</th><th>单位</th><th>状态</th></tr></thead><tbody>';
-    (d.sensors || []).forEach(function (s) {
-      html += '<tr class="' + (s.valid ? '' : 'stale') + '">' +
+    // 只展示在线(valid)的传感器,自动适应从机实际接了几个——不再为离线/从未响应过的
+    // 传感器摆一行"未刷新"占位(2026-08-21改动;后端仍然发送全量11个传感器的valid状态,
+    // 这里只是前端选择只画在线的,不用改协议/JSON)
+    (d.sensors || []).filter(function (s) { return s.valid; }).forEach(function (s) {
+      html += '<tr>' +
         '<td>' + escapeHtml(s.name) + '</td>' +
         '<td class="value-cell">0x' + s.sensor_num.toString(16).toUpperCase() + '</td>' +
         '<td class="value-cell">' + s.value + '</td>' +
         '<td>' + escapeHtml(s.unit) + '</td>' +
-        '<td>' + (s.valid ? '实时' : '未刷新') + '</td>' +
+        '<td>实时</td>' +
         '</tr>';
     });
     html += '</tbody></table></div>';
