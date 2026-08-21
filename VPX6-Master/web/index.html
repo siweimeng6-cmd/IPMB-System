@@ -141,6 +141,7 @@
   th, td { text-align: left; padding: 7px 6px; border-bottom: 1px solid var(--border); }
   th { color: var(--text-dim); font-weight: 600; font-size: 11px; text-transform: uppercase; }
   tr.stale td { color: var(--text-dim); font-style: italic; }
+  tr.sensor-alarm td { background: var(--danger-bg); color: var(--danger); }
   .value-cell { font-family: var(--mono); }
 
   .btn {
@@ -237,6 +238,7 @@
   </div>
   <span id="connBadge" class="badge bad"><span class="dot"></span>离线</span>
   <button class="btn" id="identityViewBtn" style="margin-left:8px">设置</button>
+  <button class="btn" id="thresholdViewBtn" style="margin-left:8px">阈值设置</button>
   <div class="spacer"></div>
   <span id="healthMeta" class="meta"></span>
 </header>
@@ -291,13 +293,60 @@
     { id: 11, label: 'OS版本', type: 'text' }
   ];
 
+  // "阈值设置"视图(2026-08-21新增)可编辑的6个报警/断电阈值字段,跟主控
+  // task_slot_cache.h/bsp_httpd.c 的约定一一对应:温度是绝对摄氏度(-128~127),
+  // 电压是百分比(0~100)。全局只有一套配置,应用于全部温度/电压传感器,不像
+  // IDENTITY_FIELDS 那样按field_id逐个字段提交——保存时6个字段一次性整体提交。
+  var THRESHOLD_FIELDS = [
+    { id: 'temp_alarm_high', label: '温度报警上限(℃)', min: -128, max: 127 },
+    { id: 'temp_alarm_low', label: '温度报警下限(℃)', min: -128, max: 127 },
+    { id: 'temp_shutdown_high', label: '温度断电上限(℃)', min: -128, max: 127 },
+    { id: 'temp_shutdown_low', label: '温度断电下限(℃)', min: -128, max: 127 },
+    { id: 'volt_alarm_percent', label: '电压报警百分比(%)', min: 0, max: 100 },
+    { id: 'volt_shutdown_percent', label: '电压断电百分比(%)', min: 0, max: 100 }
+  ];
+
+  // 电压传感器各自的标称值,跟从机 ipmb_sensor.c 的 s_volt_nominal 数组一一对应,
+  // 用来把百分比阈值折算成实际电压范围显示。风扇(0x41)/电流(0x07)不参与阈值。
+  var VOLT_NOMINAL = { 0x03: 12, 0x17: 5, 0x16: 3.3, 0x12: 1.2, 0x19: 0.81, 0x10: 0.81 };
+  var TEMP_SENSOR_NUMS = [0x04, 0x20, 0x21];
+
+  // 给传感器表算一行的报警/断电阈值展示文本 + 当前值是否越过报警范围。
+  // th 无效(还没轮询到)或该传感器不在温度/电压之列(风扇/电流)时返回 null。
+  function sensorThresholdInfo(s, th) {
+    if (!th || !th.valid) return null;
+    if (TEMP_SENSOR_NUMS.indexOf(s.sensor_num) !== -1) {
+      return {
+        alarmText: th.temp_alarm_low + '~' + th.temp_alarm_high,
+        shutdownText: th.temp_shutdown_low + '~' + th.temp_shutdown_high,
+        isAlarm: (s.value > th.temp_alarm_high || s.value < th.temp_alarm_low)
+      };
+    }
+    if (VOLT_NOMINAL.hasOwnProperty(s.sensor_num)) {
+      var nominal = VOLT_NOMINAL[s.sensor_num];
+      var aBand = nominal * th.volt_alarm_percent / 100;
+      var sBand = nominal * th.volt_shutdown_percent / 100;
+      var aLow = nominal - aBand, aHigh = nominal + aBand;
+      var sLow = nominal - sBand, sHigh = nominal + sBand;
+      return {
+        alarmText: aLow.toFixed(2) + '~' + aHigh.toFixed(2),
+        shutdownText: sLow.toFixed(2) + '~' + sHigh.toFixed(2),
+        isAlarm: (s.value > aHigh || s.value < aLow)
+      };
+    }
+    return null;
+  }
+
   var state = {
     baseUrl: '',
     slots: [],
     selectedSlot: null,
     detail: null,
     tickets: [],   // {ticket, actionLabel, status, completion_code, note}
-    view: 'detail'   // 'detail' | 'identity' —— 2026-08-20新增,同页整体切换到"设置"视图
+    view: 'detail',   // 'detail' | 'identity' | 'threshold' —— 同页整体切换视图,
+                       // identity是2026-08-20新增,threshold是2026-08-21新增
+    prevThresholdExceeded: null   // 2026-08-21新增:记录上一次 pem.threshold_exceeded,
+                                    // 用于在"最近操作"里检测跳变、插入一条本地日志
   };
 
   var els = {
@@ -306,7 +355,8 @@
     healthMeta: document.getElementById('healthMeta'),
     slotList: document.getElementById('slotList'),
     mainPanel: document.getElementById('mainPanel'),
-    identityViewBtn: document.getElementById('identityViewBtn')
+    identityViewBtn: document.getElementById('identityViewBtn'),
+    thresholdViewBtn: document.getElementById('thresholdViewBtn')
   };
 
   function loadBaseUrl() {
@@ -400,6 +450,7 @@
   function selectSlot(id) {
     state.selectedSlot = id;
     state.view = 'detail';   // 从侧边栏选槽位视为想看详情,自动切回详情视图
+    state.prevThresholdExceeded = null;   // 换槽位重置基线,避免把"换了个槽位"误判成"阈值状态跳变"
     renderSlotList();
     renderPanelSkeleton();   // 控制面板/高级面板/操作记录只在切换槽位时重建一次
     refreshDetail();
@@ -444,6 +495,96 @@
     state.view = 'detail';
     renderPanelSkeleton();
     refreshDetail();
+  }
+
+  // ---------- threshold settings view(2026-08-21新增) ----------
+  // 同 identity 视图一样是同页整体切换,复用既有的 ticket 提交/轮询/展示逻辑。
+  // 跟 identity 不同的是:全局只有一套配置(不按field_id区分),保存时6个字段
+  // 一次性整体提交,不是逐个字段提交。
+
+  function showThresholdView() {
+    state.view = 'threshold';
+    renderThresholdView();
+  }
+
+  function backFromThresholdView() {
+    state.view = 'detail';
+    renderPanelSkeleton();
+    refreshDetail();
+  }
+
+  function renderThresholdView() {
+    var t = (state.detail && state.detail.threshold) || {};
+    var html = '<div class="card" style="margin-bottom:16px"><h3>报警/断电阈值设置' +
+      (state.selectedSlot === null ? '' : (' - 槽位' + state.selectedSlot)) + '</h3>';
+
+    if (state.selectedSlot === null) {
+      html += '<div class="empty-state">请先在左侧选择一个槽位</div></div>';
+    } else {
+      html += '<div style="color:var(--text-dim);font-size:12px;margin-bottom:8px">' +
+        '温度阈值应用于全部温度传感器;电压阈值是百分比,按各自标称值折算,应用于全部电压传感器。' +
+        '断电阈值需要持续超限约6秒才真正触发断电,断电后需要手动重新开机才会恢复检测。</div>' +
+        THRESHOLD_FIELDS.map(function (f) {
+          var prefill = (t[f.id] !== undefined && t[f.id] !== null) ? String(t[f.id]) : '';
+          return '<div class="adv-row"><span class="adv-label">' + escapeHtml(f.label) +
+            '</span><input type="number" data-threshold-field="' + f.id +
+            '" value="' + escapeHtml(prefill) + '" min="' + f.min + '" max="' + f.max + '"></div>';
+        }).join('') +
+        '<div class="btn-row" style="margin-top:12px">' +
+        '<button class="btn primary" id="thresholdSaveBtn">保存全部修改</button>' +
+        '<button class="btn" id="thresholdBackBtn">返回</button>' +
+        '</div></div>';
+    }
+
+    html += '<div class="card"><h3>最近操作</h3><div class="ticket-log" id="ticketLog"></div></div>';
+
+    els.mainPanel.innerHTML = html;
+    renderTicketLog();
+
+    var backBtn = document.getElementById('thresholdBackBtn');
+    if (backBtn) backBtn.addEventListener('click', backFromThresholdView);
+    var saveBtn = document.getElementById('thresholdSaveBtn');
+    if (saveBtn) saveBtn.addEventListener('click', function () { onThresholdSaveClick(saveBtn); });
+  }
+
+  function submitThreshold(values) {
+    apiPost('/api/v1/slots/' + state.selectedSlot + '/threshold', values)
+      .then(function (resp) {
+        addTicket(resp.ticket, '槽位' + state.selectedSlot + ' 阈值配置', '');
+        pollTicket(resp.ticket);
+      }).catch(function (err) {
+        alert('阈值配置提交失败: ' + (err && err.error ? err.error : JSON.stringify(err)));
+      });
+  }
+
+  function onThresholdSaveClick(btn) {
+    var values = {};
+    var ok = true;
+    btn.disabled = true;
+
+    THRESHOLD_FIELDS.forEach(function (f) {
+      var input = els.mainPanel.querySelector('input[data-threshold-field="' + f.id + '"]');
+      var raw = input ? input.value.trim() : '';
+      var n = parseInt(raw, 10);
+      if (raw === '' || isNaN(n) || n < f.min || n > f.max) {
+        alert(f.label + ' 必须是 ' + f.min + '~' + f.max + ' 的整数');
+        ok = false;
+      }
+      values[f.id] = n;
+    });
+
+    if (ok && values.temp_alarm_high <= values.temp_alarm_low) {
+      alert('温度报警上限必须大于下限');
+      ok = false;
+    }
+    if (ok && values.temp_shutdown_high <= values.temp_shutdown_low) {
+      alert('温度断电上限必须大于下限');
+      ok = false;
+    }
+
+    btn.disabled = false;
+    if (!ok) return;
+    submitThreshold(values);
   }
 
   // 只有 field_id 0(Device ID,原始数值)/5~6(厂家ID/产品ID,已是十六进制文本)/
@@ -579,6 +720,7 @@
     if (state.selectedSlot === null) return;
     apiGet('/api/v1/slots/' + state.selectedSlot).then(function (d) {
       state.detail = d;
+      checkThresholdTransition(d);
       renderDetail();
     }).catch(function () {
       state.detail = null;
@@ -593,6 +735,7 @@
     var area = document.getElementById('dataArea');
     if (!area) return;   // 用户已经切到别的槽位/离开页面,这次响应就丢弃
     var dev = d.device_id, bs = d.board_status, sr = d.slot_readback, pem = d.pem, cf = d.custom_fields || {};
+    var th = d.threshold || {};
 
     var html = '<div class="grid">';
 
@@ -640,19 +783,28 @@
 
     html += '</div>'; // grid
 
-    // sensors table
+    // sensors table(2026-08-21新增阈值列):温度阈值是绝对摄氏度,直接来自
+    // d.threshold;电压阈值是百分比,按各自标称值(跟从机 ipmb_sensor.c
+    // s_volt_nominal 一致)在前端折算成实际范围显示。风扇/电流这次不参与阈值
+    // (电流底层采集是死代码,数据不可信,已跟用户确认跳过),显示"-"。
+    // 当前数值超出报警范围的行整行标红——现有PEM协议只报全局状态、不区分
+    // 具体哪路传感器越限,这是前端"当前值 vs 已知阈值"自己推算出来的视觉提示,
+    // 不依赖协议扩展。
     html += '<div class="card" style="margin-bottom:16px"><h3>传感器</h3><table><thead><tr>' +
-      '<th>名称</th><th>编号</th><th>数值</th><th>单位</th><th>状态</th></tr></thead><tbody>';
+      '<th>名称</th><th>编号</th><th>数值</th><th>单位</th><th>报警阈值</th><th>断电阈值</th><th>状态</th></tr></thead><tbody>';
     // 只展示在线(valid)的传感器,自动适应从机实际接了几个——不再为离线/从未响应过的
     // 传感器摆一行"未刷新"占位(2026-08-21改动;后端仍然发送全量11个传感器的valid状态,
     // 这里只是前端选择只画在线的,不用改协议/JSON)
     (d.sensors || []).filter(function (s) { return s.valid; }).forEach(function (s) {
-      html += '<tr>' +
+      var info = sensorThresholdInfo(s, th);
+      html += '<tr' + (info && info.isAlarm ? ' class="sensor-alarm"' : '') + '>' +
         '<td>' + escapeHtml(s.name) + '</td>' +
         '<td class="value-cell">0x' + s.sensor_num.toString(16).toUpperCase() + '</td>' +
         '<td class="value-cell">' + s.value + '</td>' +
         '<td>' + escapeHtml(s.unit) + '</td>' +
-        '<td>实时</td>' +
+        '<td>' + (info ? escapeHtml(info.alarmText) : '-') + '</td>' +
+        '<td>' + (info ? escapeHtml(info.shutdownText) : '-') + '</td>' +
+        '<td>' + (info && info.isAlarm ? '报警中' : '实时') + '</td>' +
         '</tr>';
     });
     html += '</tbody></table></div>';
@@ -731,7 +883,29 @@
     box.innerHTML = html;
   }
   function statusText(s) {
-    return { pending: '处理中...', done: '完成', timeout: '超时', error: '失败' }[s] || s;
+    return { pending: '处理中...', done: '完成', timeout: '超时', error: '失败', info: '事件' }[s] || s;
+  }
+
+  // 2026-08-21新增:PEM 阈值超限/恢复状态跳变时,在"最近操作"里插入一条本地生成的
+  // 记录——不是真正提交给从机的命令,不走 ticket 号/pollTicket 轮询,ticket 字段
+  // 用字符串前缀跟真实的数字 ticket 区分开,避免被 pollTicket 的 x.ticket===ticket
+  // 数值匹配误认成同一条。弥补现有PEM"只报全局状态、不区分具体哪个传感器"的限制——
+  // 至少让状态跳变本身在操作记录里可见。
+  var s_pemEventSeq = 0;
+  function addPemEvent(label) {
+    s_pemEventSeq++;
+    state.tickets.unshift({ ticket: 'pem-' + s_pemEventSeq, label: label, status: 'info', note: '' });
+    if (state.tickets.length > 12) state.tickets.length = 12;
+    renderTicketLog();
+  }
+
+  function checkThresholdTransition(d) {
+    var cur = (d.pem && d.pem.valid) ? d.pem.threshold_exceeded : null;
+    if (cur === null || cur === undefined) return;
+    if (state.prevThresholdExceeded !== null && cur !== state.prevThresholdExceeded) {
+      addPemEvent('槽位' + state.selectedSlot + ' 阈值状态: ' + (cur ? '报警中' : '已恢复正常'));
+    }
+    state.prevThresholdExceeded = cur;
   }
 
   function pollTicket(ticket) {
@@ -760,6 +934,7 @@
   }
 
   if (els.identityViewBtn) els.identityViewBtn.addEventListener('click', showIdentityView);
+  if (els.thresholdViewBtn) els.thresholdViewBtn.addEventListener('click', showThresholdView);
 
   loadBaseUrl();
   refreshAll();

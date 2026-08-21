@@ -835,5 +835,34 @@ curl.exe -X POST http://192.168.100.20/api/v1/slots/5/control -d "{\"action\":\"
 curl.exe -X POST http://192.168.100.20/api/v1/slots/5/control -d "{\"action\":\"power_on\"}"
 需要我现在帮你写一个简单的本地测试页（用 fetch 调这些接口、表格展示结果，方便点按钮测试而不用一直敲 curl）吗？
 
+=====================================================================
+⑪ Get/Set Threshold Config(netFn=06h/App,cmd=19h/1Ah)——2026-08-21新增
+=====================================================================
+# 传感器报警/断电阈值,全局只有一套配置,存EEPROM(J2I-Slave1侧,地址1024起),
+# 数据格式(6字节): temp_alarm_high/low、temp_shutdown_high/low(int8,摄氏度)、
+# volt_alarm_percent/shutdown_percent(uint8,0~100)。温度阈值应用于3路温度传感器,
+# 电压阈值按各自标称值折算,应用于6路电压传感器。电流(0x07)这次不纳入阈值检测
+# (底层采集 Board_BPD20550_current 从未被调用,数据不可信)。详细字节示例见
+# J2I-Slave1/指令.txt 同一节。
+
+# 主控网页HTTP接口:
+# GET /api/v1/slots/{n} 响应体里的 "threshold":{...} 块直接带出当前配置(见
+# handle_slot_detail),不需要单独GET接口。
+
+# 写入(POST /api/v1/slots/{n}/threshold),body 是6个具名字段,不是field_id+value:
+curl.exe -X POST http://192.168.100.20/api/v1/slots/5/threshold -d "{\"temp_alarm_high\":70,\"temp_alarm_low\":0,\"temp_shutdown_high\":80,\"temp_shutdown_low\":-10,\"volt_alarm_percent\":10,\"volt_shutdown_percent\":20}"
+# 返回类似 {"ticket":1,"slot_id":5}
+
+# 拿ticket轮询结果(跟其它写入命令共用同一套ticket机制)
+curl.exe http://192.168.100.20/api/v1/tickets/1
+
+【行为说明】
+- 断电(shutdown)阈值持续超限3轮(约6秒,由从机 Sensor_Task 2秒周期决定)才真正
+  触发断电,触发后锁存,直到从机重新上电(power_on)才恢复检测——这是从机侧
+  ipmb_sensor.c 的行为,主控这边只是把配置写进去,不需要额外处理。
+- 报警(alarm)状态目前仍然只能从 PEM(⑦节,"pem":{"threshold_exceeded":...})
+  看到全局标志,不区分具体哪个传感器越限;网页是靠"当前传感器值 vs 已知阈值配置"
+  自己在前端推算哪一行处于报警状态,不是协议层面区分的。
+
 
 

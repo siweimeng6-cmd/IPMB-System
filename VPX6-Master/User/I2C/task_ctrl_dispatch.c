@@ -94,6 +94,43 @@ uint16_t Ipmb_BoardIdentity_Submit(uint8_t target_addr, uint8_t field_id, const 
 	return ticket;
 }
 
+uint16_t Ipmb_ThresholdConfig_Submit(uint8_t target_addr, const uint8_t *value, uint8_t value_len)
+{
+	IpmbCtrlReq_t req;
+	uint16_t ticket;
+	uint8_t slot_idx, i;
+
+	if (value_len > IPMB_CTRL_DATA_MAX) return 0;
+	if (xIPMB_CtrlReqQueue == NULL) return 0;
+
+	ticket = s_next_ticket;
+	slot_idx = (uint8_t)(ticket % IPMB_CTRL_MAX_TICKETS);
+
+	s_results[slot_idx].ticket = ticket;
+	s_results[slot_idx].in_use = 1;
+	s_results[slot_idx].control_req = 0;   /* 这个kind不需要真实语义,固定填0 */
+	s_results[slot_idx].completion_code = 0xFF;
+	s_results[slot_idx].status = IPMB_CTRL_PENDING;
+	s_results[slot_idx].submitted_tick = xTaskGetTickCount();
+	s_results[slot_idx].completed_tick = 0;
+
+	req.target_addr = target_addr;
+	req.req_kind = IPMB_CTRL_KIND_THRESHOLD_CONFIG;
+	req.control_req = 0;
+	req.data_len = value_len;
+	for (i = 0; i < value_len; i++) req.data[i] = value[i];
+	req.ticket = ticket;
+
+	if (xQueueSend(xIPMB_CtrlReqQueue, &req, (TickType_t)0) != pdTRUE) {
+		s_results[slot_idx].status = IPMB_CTRL_TIMEOUT;
+		return 0;
+	}
+
+	s_next_ticket++;
+	if (s_next_ticket == 0) s_next_ticket = 1;
+	return ticket;
+}
+
 const IpmbCtrlResult_t* Ipmb_Ctrl_GetResult(uint16_t ticket)
 {
 	uint8_t slot_idx;
@@ -130,6 +167,9 @@ static uint8_t ctrl_dispatch_send_one(uint8_t req_kind, uint8_t target_addr, uin
 	if (req_kind == IPMB_CTRL_KIND_BOARD_IDENTITY) {
 		IPMB_Build_SetBoardIdentityField(&pkt, target_addr, IPMB_CTRL_HOST_ADDR_7BIT, rqseq,
 		                                  control_req, data, data_len);
+	} else if (req_kind == IPMB_CTRL_KIND_THRESHOLD_CONFIG) {
+		IPMB_Build_SetThresholdConfig(&pkt, target_addr, IPMB_CTRL_HOST_ADDR_7BIT, rqseq,
+		                               data, data_len);
 	} else {
 		IPMB_Build_SetFruActivation(&pkt, target_addr, IPMB_CTRL_HOST_ADDR_7BIT, rqseq,
 		                             control_req, data, data_len);
@@ -246,6 +286,14 @@ void IPMB_Ctrl_Dispatch_Task(void *parameter)
 									if (req.control_req <= 6) slot->devid_valid = 0;
 									else slot->custom_valid = 0;
 								}
+							}
+						} else if (req.req_kind == IPMB_CTRL_KIND_THRESHOLD_CONFIG) {
+							/* 阈值配置写入成功——清缓存有效位,让下一轮轮询
+							 * (task_slot_poll.c)重新拉取新值,网页阈值设置页/
+							 * 传感器表阈值列才能跟着刷新 */
+							if (cc == 0x00) {
+								IpmbSlotCache_t *slot = Ipmb_SlotCache_FindOrAlloc(req.target_addr);
+								if (slot != NULL) slot->threshold_valid = 0;
 							}
 						} else if (req.control_req == 0x09 && cc == 0x00) {
 							/* 设置IPMC版本成功——Get Device ID现在跟Board Status共用

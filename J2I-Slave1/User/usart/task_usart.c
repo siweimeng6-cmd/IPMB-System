@@ -2,6 +2,7 @@
 #include "bsp_init.h"
 #include ".\\gpio\\bsp_gpio.h"
 #include ".\\i2c\\bsp_eeprom.h"
+#include ".\\ipmb\\ipmb_sensor.h"  /* IPMB_Sensor_CheckThresholds,2026-08-21新增 */
 #include "task_fw_update.h"
 #include <stdlib.h>   /* strtof()，用于解析主机上报的"CPU_TEMP="温度参数 */
 
@@ -32,6 +33,8 @@ void Sensor_Task(void* parameter)
 		Board_ADDR94_temp();
 
 		ADC_Calculation();
+		IPMB_Sensor_CheckThresholds();   /* 2026-08-21新增:紧跟在温度/ADC刷新之后,
+		                                   * 读最新数据做报警/断电阈值检测 */
 //		pwm_func();
 
 		/* Read each GA pin in this cycle.  CPEX encoding is active-low:

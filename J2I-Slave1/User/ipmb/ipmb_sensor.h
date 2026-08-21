@@ -20,23 +20,17 @@
 #define IPMB_READING_UNAVAILABLE      0x7FFF
 #define IPMB_THRESHOLD_UNAVAILABLE    0x7FFF
 
-/* ==================== 自动阈值检测门限(占位值!)====================
- * 仓库里没有任何地方写过这几路传感器的真实报警/恢复门限,下面数值是
- * 临时占位,仅用于把"自动检测→自主推送 PEM"这条链路跑通。接入前请
- * 按实际硬件规格改成真实值。每路都做迟滞(assert 门限 != clear 门限),
- * 避免读数在门限附近抖动时反复触发。 */
-#define IPMB_TH_TEMP_ASSERT_C         70      /* 90Temp/92Temp: >=70C 报警 */
-#define IPMB_TH_TEMP_CLEAR_C          65      /*                <=65C 恢复 */
-#define IPMB_TH_V12_LOW_ASSERT        10.8f   /* V12: <10.8V 或 >13.2V 报警(±10%窗口) */
-#define IPMB_TH_V12_LOW_CLEAR         11.0f
-#define IPMB_TH_V12_HIGH_ASSERT       13.2f
-#define IPMB_TH_V12_HIGH_CLEAR        13.0f
-#define IPMB_TH_V081_LOW_ASSERT       0.675f  /* V0.81: ±10%窗口(仍按旧0.75V占位值, 未按0.81V重新计算, 见下方说明) */
-#define IPMB_TH_V081_LOW_CLEAR        0.69f
-#define IPMB_TH_V081_HIGH_ASSERT      0.825f
-#define IPMB_TH_V081_HIGH_CLEAR       0.81f
-#define IPMB_TH_IOUT_ASSERT_A         36.0f   /* Iout(12V/40A 路): >=36A 报警 */
-#define IPMB_TH_IOUT_CLEAR_A          34.0f   /*                   <=34A 恢复 */
+/* ==================== 自动阈值检测(2026-08-21接通)====================
+ * 阈值不再是编译期占位常量,改成运行时可配置、EEPROM持久化的 g_threshold_config
+ * (见 ipmb_threshold.h),网页可以通过 Get/Set Threshold Config(0x19/0x1A)读写。
+ * 温度(3路,0x04/0x20/0x21)给绝对摄氏度上下限;电压(6路)给百分比,各自按自己的
+ * 标称值折算。电流(0x07)这一路目前底层采集(Board_BPD20550_current)从未被调用、
+ * 数据本身不可信,暂不纳入阈值检测。 */
+
+/* 断电阈值需要连续多少轮(IPMB_Sensor_CheckThresholds 每被调用一次算一轮,本工程
+ * 由 Sensor_Task 每2秒调用一次,即约6秒)持续超限才真正触发断电,避免传感器瞬时
+ * 噪声/抖动误触发;硬编码,不做成可配置项 */
+#define IPMB_THRESHOLD_SHUTDOWN_PERSIST_ROUNDS   3
 
 typedef struct {
     uint8_t  sensor_num;        /* 协议 sensor 编号 (例如 0x03=12V) */
@@ -66,10 +60,17 @@ uint8_t IPMB_Sensor_Update(uint8_t sensor_num, int16_t reading);
  * 入队,这个函数暂时用不到,留作以后如果要做真正的自动阈值检测时用。 */
 void IPMB_Sensor_Notify_Threshold(uint8_t sensor_num, uint8_t event_high, uint8_t assert);
 
-/* 真正的自动阈值检测:对 90Temp/92Temp/V12/V0.81/Iout 五路做迟滞比较,
- * 0→非0 跳变时触发一次 IPMB_Sensor_Notify_Threshold(assert=1),
- * 非0→0 跳变时触发一次 assert=0,由 task_usart.c 的 Sensor_Task 每 2 秒调用一次。 */
+/* 真正的自动阈值检测(2026-08-21重写):对3路温度+6路电压做迟滞比较,阈值来自
+ * g_threshold_config(见 ipmb_threshold.h)。报警(alarm)0→1/1→0跳变触发一次
+ * IPMB_Sensor_Notify_Threshold;断电(shutdown)阈值需要连续
+ * IPMB_THRESHOLD_SHUTDOWN_PERSIST_ROUNDS 轮都超限才真正触发断电,触发后锁存,
+ * 直到 IPMB_Sensor_ClearShutdownLatch 被调用(从机重新上电时)才恢复检测。
+ * 由 task_usart.c 的 Sensor_Task 每 2 秒调用一次。 */
 void IPMB_Sensor_CheckThresholds(void);
+
+/* 清除断电锁存 + 持续超限计数,由 ipmb_fru.c 的 case 0x01(上电)调用——手动
+ * 重新上电后,阈值安全监测应该恢复生效,而不是永久失效直到MCU复位 */
+void IPMB_Sensor_ClearShutdownLatch(void);
 
 #endif
 

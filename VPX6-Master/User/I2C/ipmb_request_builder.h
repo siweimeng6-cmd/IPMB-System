@@ -62,4 +62,12 @@ uint8_t IPMB_Build_GetBoardIdentityField(ipmb_pkt_t *pkt, uint8_t target_addr, u
 uint8_t IPMB_Build_SetBoardIdentityField(ipmb_pkt_t *pkt, uint8_t target_addr, uint8_t rqsa, uint8_t rqseq,
                                           uint8_t field_id, const uint8_t *value, uint8_t value_len);
 
+/* 传感器报警/断电阈值配置(2026-08-21新增,对应从机 ipmb_threshold.c):全局只有
+ * 一套配置(温度报警上下限+温度断电上下限+电压报警%+电压断电%,共6字节),不像
+ * 板卡身份那样按field_id区分,Get不需要参数,Set固定携带6字节。 */
+uint8_t IPMB_Build_GetThresholdConfig(ipmb_pkt_t *pkt, uint8_t target_addr, uint8_t rqsa, uint8_t rqseq);
+
+uint8_t IPMB_Build_SetThresholdConfig(ipmb_pkt_t *pkt, uint8_t target_addr, uint8_t rqsa, uint8_t rqseq,
+                                       const uint8_t *value, uint8_t value_len);
+
 #endif

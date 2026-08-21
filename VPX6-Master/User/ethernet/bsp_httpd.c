@@ -24,6 +24,12 @@
 *	                                    5~6(厂家ID/产品ID)是十六进制字符串(3/2字节),
 *	                                    7~10(自定义文本字段)是普通文本(≤31字符);
 *	                                    同样立即返回202+ticket,复用同一套 ticket 机制
+*	  POST /api/v1/slots/{n}/threshold- 写入报警/断电阈值配置(2026-08-21新增,见
+*	                                    task_slot_cache.h 顶部注释),body: 6个具名字段
+*	                                    {"temp_alarm_high":N,"temp_alarm_low":N,
+*	                                    "temp_shutdown_high":N,"temp_shutdown_low":N,
+*	                                    "volt_alarm_percent":N,"volt_shutdown_percent":N},
+*	                                    温度-128~127、百分比0~100;同样立即返回202+ticket
 *	  GET  /api/v1/tickets/{n}        - 轮询上面某个 ticket 的执行结果
 *	  OPTIONS *                       - CORS 预检
 *	注    意: 每条 HTTP/1.0 请求都是一条新连接(Connection: close,无keep-alive/管线化),
@@ -45,8 +51,10 @@
 #include <string.h>
 
 /* 单线程(tcpip线程)顺序调用,不会并发,用 static 而不是栈上局部数组,
- * 避免占用 tcpip 线程的栈空间。2048B 覆盖最大的单槽位全量快照响应仍有富余 */
-static char s_httpRespBuf[2048];
+ * 避免占用 tcpip 线程的栈空间。3072B 覆盖最大的单槽位全量快照响应仍有富余
+ * (2026-08-21从2048扩到3072:11个传感器+5个自定义文本字段的 handle_slot_detail
+ * 响应已经逼近2048,这次再加阈值配置JSON块,需要更多余量) */
+static char s_httpRespBuf[3072];
 
 static err_t http_sent(void *arg, struct tcp_pcb *pcb, u16_t len)
 {
@@ -320,10 +328,21 @@ static void handle_slot_detail(struct tcp_pcb *pcb, uint8_t slot_id)
 		http_json_escape_str(os_version_esc, sizeof(os_version_esc), slot->os_version_text);
 		len += (uint16_t)sprintf(s_httpRespBuf + len,
 			"\"custom_fields\":{\"valid\":%u,\"cpu_model\":\"%s\",\"mem_size\":\"%s\","
-			"\"board_model\":\"%s\",\"serial_number\":\"%s\",\"os_version_text\":\"%s\"}}",
+			"\"board_model\":\"%s\",\"serial_number\":\"%s\",\"os_version_text\":\"%s\"},",
 			(unsigned)slot->custom_valid, cpu_model_esc, mem_size_esc, board_model_esc,
 			serial_number_esc, os_version_esc);
 	}
+
+	/* 报警/断电阈值配置(2026-08-21新增,见 task_slot_cache.h):温度是绝对摄氏度,
+	 * 电压是百分比,网页自己按标称值折算成实际范围显示 */
+	len += (uint16_t)sprintf(s_httpRespBuf + len,
+		"\"threshold\":{\"valid\":%u,\"temp_alarm_high\":%d,\"temp_alarm_low\":%d,"
+		"\"temp_shutdown_high\":%d,\"temp_shutdown_low\":%d,"
+		"\"volt_alarm_percent\":%u,\"volt_shutdown_percent\":%u}}",
+		(unsigned)slot->threshold_valid,
+		(int)slot->temp_alarm_high, (int)slot->temp_alarm_low,
+		(int)slot->temp_shutdown_high, (int)slot->temp_shutdown_low,
+		(unsigned)slot->volt_alarm_percent, (unsigned)slot->volt_shutdown_percent);
 
 	http_send_and_close(pcb, len);
 }
@@ -419,6 +438,24 @@ static uint8_t http_json_find_uint(const char *body, const char *key, uint32_t *
 	while (p[n] >= '0' && p[n] <= '9') { v = v * 10 + (uint32_t)(p[n] - '0'); n++; if (n > 9) return 0; }
 	if (n == 0) return 0;
 	*out = v;
+	return 1;
+}
+
+/* 跟 http_json_find_uint 同一个精神,够用即可:多支持一个可选前导'-',给报警/断电
+ * 阈值里可以是负数的温度字段用(比如断电下限默认-10) */
+static uint8_t http_json_find_int(const char *body, const char *key, int32_t *out)
+{
+	const char *p = strstr(body, key);
+	int32_t v = 0;
+	uint8_t neg = 0;
+	uint8_t n = 0;
+	if (p == NULL) return 0;
+	p += strlen(key);
+	while (*p == ' ' || *p == ':') p++;
+	if (*p == '-') { neg = 1; p++; }
+	while (p[n] >= '0' && p[n] <= '9') { v = v * 10 + (int32_t)(p[n] - '0'); n++; if (n > 9) return 0; }
+	if (n == 0) return 0;
+	*out = neg ? -v : v;
 	return 1;
 }
 
@@ -637,6 +674,67 @@ static void handle_slot_identity_set(struct tcp_pcb *pcb, uint8_t slot_id, const
 	http_send_and_close(pcb, len);
 }
 
+/*
+*********************************************************************************************************
+*	函 数 名: handle_slot_threshold_set
+*	功能说明: POST /api/v1/slots/{n}/threshold(2026-08-21新增)——流程比照
+*	          handle_slot_identity_set:解析body(这次是6个具名字段一次性写全部配置,
+*	          不是field_id+value单值形式)→ Ipmb_ThresholdConfig_Submit → 202+ticket,
+*	          不等 IPMB 往返完成。body: {"temp_alarm_high":N,"temp_alarm_low":N,
+*	          "temp_shutdown_high":N,"temp_shutdown_low":N,"volt_alarm_percent":N,
+*	          "volt_shutdown_percent":N},温度字段允许负数(-128~127),百分比0~100。
+*********************************************************************************************************
+*/
+static void handle_slot_threshold_set(struct tcp_pcb *pcb, uint8_t slot_id, const char *body)
+{
+	IpmbSlotCache_t *slot = Ipmb_SlotCache_FindBySlotId(slot_id);
+	uint16_t len;
+	int32_t  t_ah, t_al, t_sh, t_sl;
+	uint32_t v_ap, v_sp;
+	uint8_t  data[6];
+	uint16_t ticket;
+
+	if (slot == NULL) {
+		len = http_write_headers(s_httpRespBuf, 404, "Not Found", "application/json");
+		len += (uint16_t)sprintf(s_httpRespBuf + len, "{\"error\":\"slot %u not online\"}", (unsigned)slot_id);
+		http_send_and_close(pcb, len);
+		return;
+	}
+
+	if (!http_json_find_int(body, "\"temp_alarm_high\"", &t_ah) || t_ah < -128 || t_ah > 127 ||
+	    !http_json_find_int(body, "\"temp_alarm_low\"", &t_al) || t_al < -128 || t_al > 127 ||
+	    !http_json_find_int(body, "\"temp_shutdown_high\"", &t_sh) || t_sh < -128 || t_sh > 127 ||
+	    !http_json_find_int(body, "\"temp_shutdown_low\"", &t_sl) || t_sl < -128 || t_sl > 127 ||
+	    !http_json_find_uint(body, "\"volt_alarm_percent\"", &v_ap) || v_ap > 100 ||
+	    !http_json_find_uint(body, "\"volt_shutdown_percent\"", &v_sp) || v_sp > 100) {
+		len = http_write_headers(s_httpRespBuf, 400, "Bad Request", "application/json");
+		len += (uint16_t)sprintf(s_httpRespBuf + len,
+			"{\"error\":\"missing/invalid threshold fields (temp -128~127, percent 0~100)\"}");
+		http_send_and_close(pcb, len);
+		return;
+	}
+
+	data[0] = (uint8_t)(int8_t)t_ah;
+	data[1] = (uint8_t)(int8_t)t_al;
+	data[2] = (uint8_t)(int8_t)t_sh;
+	data[3] = (uint8_t)(int8_t)t_sl;
+	data[4] = (uint8_t)v_ap;
+	data[5] = (uint8_t)v_sp;
+
+	ticket = Ipmb_ThresholdConfig_Submit(slot->addr, data, sizeof(data));
+	if (ticket == 0) {
+		len = http_write_headers(s_httpRespBuf, 503, "Service Unavailable", "application/json");
+		len += (uint16_t)sprintf(s_httpRespBuf + len, "{\"error\":\"control queue full, retry later\"}");
+		http_send_and_close(pcb, len);
+		return;
+	}
+
+	len = http_write_headers(s_httpRespBuf, 202, "Accepted", "application/json");
+	len += (uint16_t)sprintf(s_httpRespBuf + len,
+		"{\"ticket\":%u,\"slot_id\":%u}", (unsigned)ticket, (unsigned)slot_id);
+	http_send_and_close(pcb, len);
+}
+
 static void handle_ticket_get(struct tcp_pcb *pcb, uint16_t ticket)
 {
 	const IpmbCtrlResult_t *r = Ipmb_Ctrl_GetResult(ticket);
@@ -805,6 +903,11 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err
 				if (strcmp(rest, "/identity") == 0)
 				{
 					handle_slot_identity_set(pcb, slot_id, body);
+					return ERR_OK;
+				}
+				if (strcmp(rest, "/threshold") == 0)
+				{
+					handle_slot_threshold_set(pcb, slot_id, body);
 					return ERR_OK;
 				}
 			}

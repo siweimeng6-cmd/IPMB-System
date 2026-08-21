@@ -33,7 +33,10 @@
  * 和 ctrl_dispatch_send_one 内部调哪个 IPMB_Build_* 构帧函数,见 task_ctrl_dispatch.c */
 typedef enum {
 	IPMB_CTRL_KIND_FRU = 0,             /* control_req = Set FRU Activation 子命令(0x00~0x11) */
-	IPMB_CTRL_KIND_BOARD_IDENTITY = 1   /* control_req 借用为 field_id(0~10) */
+	IPMB_CTRL_KIND_BOARD_IDENTITY = 1,  /* control_req 借用为 field_id(0~10) */
+	IPMB_CTRL_KIND_THRESHOLD_CONFIG = 2 /* control_req 不需要真实语义,固定填0;全局只有
+	                                        一套配置(温度上下限+电压百分比),不像板卡身份
+	                                        按field_id区分,data固定6字节(2026-08-21新增) */
 } IpmbCtrlKind_t;
 
 /* tcpip线程(Ipmb_Ctrl_Submit/Ipmb_BoardIdentity_Submit) -> IPMB_Ctrl_Dispatch_Task 的
@@ -80,6 +83,12 @@ uint16_t Ipmb_Ctrl_Submit(uint8_t target_addr, uint8_t control_req, const uint8_
  * (不含结尾'\0'),value_len 上限 63。复用同一个 ticket 环形表,前端轮询代码不用改。
  * 返回值同 Ipmb_Ctrl_Submit。 */
 uint16_t Ipmb_BoardIdentity_Submit(uint8_t target_addr, uint8_t field_id, const uint8_t *value, uint8_t value_len);
+
+/* 提交一条报警/断电阈值配置写入(2026-08-21新增,见 ipmb_threshold.h);value/value_len
+ * 是待写入的6字节配置(温度报警上下限+温度断电上下限+电压报警%+电压断电%),
+ * value_len 必须等于6。复用同一个 ticket 环形表,前端轮询代码不用改。
+ * 返回值同 Ipmb_Ctrl_Submit。 */
+uint16_t Ipmb_ThresholdConfig_Submit(uint8_t target_addr, const uint8_t *value, uint8_t value_len);
 
 /* 查询某个 ticket 的当前结果;ticket 不存在/已被环形表覆盖返回 NULL */
 const IpmbCtrlResult_t* Ipmb_Ctrl_GetResult(uint16_t ticket);

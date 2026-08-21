@@ -177,6 +177,26 @@ void Ipmb_SlotCache_StoreCustomField(IpmbSlotCache_t *slot, uint8_t field_id, co
 	slot->last_seen_tick = xTaskGetTickCount();
 }
 
+/* 响应帧布局(Get Threshold Config 0x19,见 J2I-Slave1 ipmb_slave.c
+ * IPMB_Slave_Handle_GetThresholdConfig):buf[6]=完成码,buf[7..12]=6字节配置
+ * (温度报警上下限/温度断电上下限/电压报警%/电压断电%),不像板卡身份字段那样
+ * 带field_id回显——全局只有一套配置,不需要区分。 */
+void Ipmb_SlotCache_StoreThreshold(IpmbSlotCache_t *slot, const ipmb_pkt_t *rsp)
+{
+	if (slot == NULL) return;
+	if (rsp == NULL || rsp->len < 13 || rsp->buf[6] != 0x00) return;
+
+	slot->temp_alarm_high        = (int8_t)rsp->buf[7];
+	slot->temp_alarm_low         = (int8_t)rsp->buf[8];
+	slot->temp_shutdown_high     = (int8_t)rsp->buf[9];
+	slot->temp_shutdown_low      = (int8_t)rsp->buf[10];
+	slot->volt_alarm_percent     = rsp->buf[11];
+	slot->volt_shutdown_percent  = rsp->buf[12];
+	slot->threshold_valid = 1;
+	slot->online = 1;
+	slot->last_seen_tick = xTaskGetTickCount();
+}
+
 /* PEM 帧布局见 task_i2c.c IPMB_Test_Command_Task 已验证过的解析(pem->buf[3]=源地址,
  * buf[9]=eventType,buf[10]=eventData1,buf[11]=eventData2),照抄同一套位运算 */
 void Ipmb_SlotCache_StorePem(uint8_t addr, const ipmb_pem_pkt_t *pem)

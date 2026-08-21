@@ -110,3 +110,20 @@ uint8_t IPMB_Build_SetBoardIdentityField(ipmb_pkt_t *pkt, uint8_t target_addr, u
 	for (i = 0; i < value_len; i++) pkt->buf[pkt->len++] = value[i];
 	return rb_put_tail_chk(pkt);
 }
+
+uint8_t IPMB_Build_GetThresholdConfig(ipmb_pkt_t *pkt, uint8_t target_addr, uint8_t rqsa, uint8_t rqseq)
+{
+	rb_put_header(pkt, target_addr, 0x06, rqsa, rqseq, 0x19);   /* netFn=06h(App),cmd=19h,无数据 */
+	return rb_put_tail_chk(pkt);
+}
+
+uint8_t IPMB_Build_SetThresholdConfig(ipmb_pkt_t *pkt, uint8_t target_addr, uint8_t rqsa, uint8_t rqseq,
+                                       const uint8_t *value, uint8_t value_len)
+{
+	uint8_t i;
+	if (value_len != 6) return 0;   /* 跟从机 IPMB_THRESHOLD_CONFIG_LEN 一致,固定6字节 */
+
+	rb_put_header(pkt, target_addr, 0x06, rqsa, rqseq, 0x1A);   /* netFn=06h,cmd=1Ah */
+	for (i = 0; i < value_len; i++) pkt->buf[pkt->len++] = value[i];
+	return rb_put_tail_chk(pkt);
+}

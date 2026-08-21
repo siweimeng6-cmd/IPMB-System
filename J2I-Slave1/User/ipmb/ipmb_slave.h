@@ -79,6 +79,12 @@ void IPMB_Slave_Handle_GetBoardIdentity(const uint8_t* req, uint8_t req_len,
 void IPMB_Slave_Handle_SetBoardIdentity(const uint8_t* req, uint8_t req_len,
                                           uint8_t* resp, uint8_t* resp_len,
                                           uint8_t own_addr);
+void IPMB_Slave_Handle_GetThresholdConfig(const uint8_t* req, uint8_t req_len,
+                                          uint8_t* resp, uint8_t* resp_len,
+                                          uint8_t own_addr);
+void IPMB_Slave_Handle_SetThresholdConfig(const uint8_t* req, uint8_t req_len,
+                                          uint8_t* resp, uint8_t* resp_len,
+                                          uint8_t own_addr);
 
 /* =================== FreeRTOS 任务入口 (定义在 task_ipmb.c) =================== */
 void IPMB_A_Task(void* parameter);

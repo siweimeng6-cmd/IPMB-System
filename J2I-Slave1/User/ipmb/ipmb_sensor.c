@@ -1,8 +1,11 @@
 #include "ipmb_sensor.h"
 #include "ipmb_fru.h"
-#include "bsp_mo_i2c.h"     /* board_temp0/1, Board_ADDR90_temp/92_temp */
+#include "ipmb_threshold.h" /* g_threshold_config */
+#include "bsp_mo_i2c.h"     /* board_temp0/1/2, Board_ADDR90/92/94_temp */
 #include "bsp_adc.h"        /* stADC_Data */
 #include "bsp_bpd20550.h"   /* g_bpd20550_current_A */
+#include ".\gpio\bsp_gpio.h" /* PWR_CTL_GPIO_PORT/PIN, mainboard_power_state, power_state_confirmed */
+#include "FreeRTOS.h"       /* taskENTER_CRITICAL/EXIT_CRITICAL */
 #include <string.h>
 #include <stdio.h>
 
@@ -125,87 +128,109 @@ void IPMB_Sensor_Notify_Threshold(uint8_t sensor_num, uint8_t event_high, uint8_
     }
 }
 
+/* 断电触发后锁存,后续调用直接跳过检测,直到 IPMB_Sensor_ClearShutdownLatch
+ * 被调用(ipmb_fru.c case 0x01 上电时)才恢复。跟持续超限计数一样是文件级状态,
+ * 不放进函数内 static 是因为清除函数需要从外部重置它们。 */
+static uint8_t s_shutdown_latched = 0;
+static uint8_t s_alarm_active = 0;
+static uint8_t s_temp_shutdown_persist = 0;
+static uint8_t s_volt_shutdown_persist = 0;
+
+/* 6路电压各自的标称值,跟 sensor_num 的对应关系见 ipmb_slave.c
+ * IPMB_Slave_Handle_GetSensorReading 里 adc_voltage_val[] 下标的注释:
+ * idx0=12V(0x03) idx1=5V(0x17) idx2=3.3V(0x16) idx3=0.81V-1(0x19)
+ * idx4=0.81V-2(0x10) idx5=1.2V(0x12)。这是传感器物理属性,不需要用户配置,
+ * 用户只配置报警/断电百分比,乘上这里的标称值折算出实际上下限。 */
+static const float s_volt_nominal[6] = { 12.0f, 5.0f, 3.3f, 0.81f, 0.81f, 1.2f };
+
 /**
- * @brief  真正的自动阈值检测:每次调用对 90Temp/92Temp/V12/V0.81/Iout 五路做
- *         迟滞比较,用 s_exceeded_mask 记录"当前处于超限状态"的传感器集合,
- *         只在 0→非0/非0→0 的跳变沿触发一次 IPMB_Sensor_Notify_Threshold,
- *         避免同一持续状态反复推送。门限定义见 ipmb_sensor.h(占位值)。
+ * @brief  真正的自动阈值检测(2026-08-21重写,不再是占位阈值):对3路温度
+ *         (board_temp0/1/2)和6路电压(stADC_Data.adc_voltage_val[0..5])做检测,
+ *         阈值来自运行时可配置的 g_threshold_config。报警(alarm)0→1/1→0跳变时
+ *         触发一次 IPMB_Sensor_Notify_Threshold;断电(shutdown)阈值需要连续
+ *         IPMB_THRESHOLD_SHUTDOWN_PERSIST_ROUNDS 轮都超限才真正触发,避免传感器
+ *         瞬时噪声误触发,触发后锁存直到重新上电。电流(0x07)这一路目前底层采集
+ *         从未被调用、数据不可信,这次不纳入检测。
  */
 void IPMB_Sensor_CheckThresholds(void)
 {
-    static uint8_t s_exceeded_mask = 0;
-    uint8_t new_mask = 0;
-    uint8_t changed_high = 0;   /* 本次新触发的那一路里, 是否是"高阈值" */
-    uint8_t tripped_sensor = 0;
+    uint8_t i;
+    uint8_t temp_alarm = 0, temp_shutdown = 0;
+    uint8_t volt_alarm = 0, volt_shutdown = 0;
+    uint8_t any_alarm;
+    int *temps[3];
 
-    /* 90Temp (LM75A@0x90), 协议 sensor_num = 0x04 */
-    Board_ADDR90_temp();
-    if (board_temp0[0] >= IPMB_TH_TEMP_ASSERT_C) {
-        new_mask |= 0x01;
-        if (!(s_exceeded_mask & 0x01)) { tripped_sensor = 0x04; changed_high = 1; }
-    } else if (board_temp0[0] <= IPMB_TH_TEMP_CLEAR_C) {
-        /* 低于恢复门限: 不置位 */
-    } else if (s_exceeded_mask & 0x01) {
-        new_mask |= 0x01;   /* 迟滞区间内维持原状态 */
-    }
+    if (s_shutdown_latched) return;   /* 已经触发过断电,等待人工重新上电 */
 
-    /* 92Temp (LM75A@0x92), 协议 sensor_num = 0x20 */
-    Board_ADDR92_temp();
-    if (board_temp1[0] >= IPMB_TH_TEMP_ASSERT_C) {
-        new_mask |= 0x02;
-        if (!(s_exceeded_mask & 0x02)) { tripped_sensor = 0x20; changed_high = 1; }
-    } else if (board_temp1[0] <= IPMB_TH_TEMP_CLEAR_C) {
-        /* 恢复 */
-    } else if (s_exceeded_mask & 0x02) {
-        new_mask |= 0x02;
-    }
-
-    /* V12 (ADC PA6), 协议 sensor_num = 0x03 */
+    temps[0] = board_temp0;
+    temps[1] = board_temp1;
+    temps[2] = board_temp2;
+    for (i = 0; i < 3; i++)
     {
-        float v12 = stADC_Data.adc_voltage_val[0];
-        if (v12 < IPMB_TH_V12_LOW_ASSERT || v12 > IPMB_TH_V12_HIGH_ASSERT) {
-            new_mask |= 0x04;
-            if (!(s_exceeded_mask & 0x04)) { tripped_sensor = 0x03; changed_high = (v12 > IPMB_TH_V12_HIGH_ASSERT); }
-        } else if (v12 >= IPMB_TH_V12_LOW_CLEAR && v12 <= IPMB_TH_V12_HIGH_CLEAR) {
-            /* 恢复 */
-        } else if (s_exceeded_mask & 0x04) {
-            new_mask |= 0x04;
-        }
+        int *t = temps[i];
+        if (t[0] == -1 && t[1] == 0) continue;   /* 该路从未成功读取过, 跳过 */
+        if (t[0] > g_threshold_config.temp_alarm_high || t[0] < g_threshold_config.temp_alarm_low)
+            temp_alarm = 1;
+        if (t[0] > g_threshold_config.temp_shutdown_high || t[0] < g_threshold_config.temp_shutdown_low)
+            temp_shutdown = 1;
     }
 
-    /* V0.81 (ADC PC3+PC4 平均, 0.81V1/0.81V2 两路), 协议 sensor_num = 0x19 */
+    for (i = 0; i < 6; i++)
     {
-        float v081 = (stADC_Data.adc_voltage_val[3] + stADC_Data.adc_voltage_val[4]) / 2.0f;
-        if (v081 < IPMB_TH_V081_LOW_ASSERT || v081 > IPMB_TH_V081_HIGH_ASSERT) {
-            new_mask |= 0x08;
-            if (!(s_exceeded_mask & 0x08)) { tripped_sensor = 0x19; changed_high = (v081 > IPMB_TH_V081_HIGH_ASSERT); }
-        } else if (v081 >= IPMB_TH_V081_LOW_CLEAR && v081 <= IPMB_TH_V081_HIGH_CLEAR) {
-            /* 恢复 */
-        } else if (s_exceeded_mask & 0x08) {
-            new_mask |= 0x08;
-        }
+        float v = stADC_Data.adc_voltage_val[i];
+        float nominal = s_volt_nominal[i];
+        float alarm_band = nominal * (float)g_threshold_config.volt_alarm_percent / 100.0f;
+        float shutdown_band = nominal * (float)g_threshold_config.volt_shutdown_percent / 100.0f;
+        if (v > nominal + alarm_band || v < nominal - alarm_band) volt_alarm = 1;
+        if (v > nominal + shutdown_band || v < nominal - shutdown_band) volt_shutdown = 1;
     }
 
-    /* Iout (BPD20550 PMBus, 12V/40A 路), 协议 sensor_num = 0x07 */
-    if (g_bpd20550_current_A >= IPMB_TH_IOUT_ASSERT_A) {
-        new_mask |= 0x10;
-        if (!(s_exceeded_mask & 0x10)) { tripped_sensor = 0x07; changed_high = 1; }
-    } else if (g_bpd20550_current_A <= IPMB_TH_IOUT_CLEAR_A) {
-        /* 恢复 */
-    } else if (s_exceeded_mask & 0x10) {
-        new_mask |= 0x10;
+    any_alarm = (uint8_t)(temp_alarm || volt_alarm);
+    if (any_alarm != s_alarm_active)
+    {
+        /* sensor_num=0(不区分具体哪路,既有设计如此) event_high=1(占位,HandleControl
+         * 的0x05分支只看有没有带data来判HI/LO,不看具体值) */
+        IPMB_Sensor_Notify_Threshold(0, 1, any_alarm);
+        s_alarm_active = any_alarm;
     }
 
-    if (new_mask != 0 && s_exceeded_mask == 0) {
-        /* 0 -> 非0: 新出现超限, 推一条 assert 事件 */
-        IPMB_Sensor_Notify_Threshold(tripped_sensor, changed_high, 1);
-    } else if (new_mask == 0 && s_exceeded_mask != 0) {
-        /* 非0 -> 0: 全部恢复, 推一条 clear 事件 */
-        IPMB_Sensor_Notify_Threshold(0, 0, 0);
-    }
-    /* 其余情况(仍有其它传感器超限中, 或本来就没有超限): 只更新掩码, 不重复推送 */
+    if (temp_shutdown) { if (s_temp_shutdown_persist < 255) s_temp_shutdown_persist++; }
+    else s_temp_shutdown_persist = 0;
+    if (volt_shutdown) { if (s_volt_shutdown_persist < 255) s_volt_shutdown_persist++; }
+    else s_volt_shutdown_persist = 0;
 
-    s_exceeded_mask = new_mask;
+    if (s_temp_shutdown_persist >= IPMB_THRESHOLD_SHUTDOWN_PERSIST_ROUNDS ||
+        s_volt_shutdown_persist >= IPMB_THRESHOLD_SHUTDOWN_PERSIST_ROUNDS)
+    {
+        /* 断电动作本身照抄 ipmb_fru.c case 0x00,但cause改成SHUTDOWN_THRESHOLD而不是
+         * USER_REQUEST,所以不直接复用 IPMB_FRU_HandleControl(0x00,...);顺带
+         * g_pem_event_seq++ 保证这次断电对主控可见(现有case 0x00本身不会推PEM)。
+         * 这几个共享状态目前项目里没有锁保护(既有的潜在竞态),这里是第4个写者,
+         * 加临界区保护,降低无人值守断电场景下的风险。 */
+        taskENTER_CRITICAL();
+        g_fru_state.prev_sys_state = g_fru_state.sys_state;
+        g_fru_state.sys_state = IPMB_STATE_M0;
+        g_fru_state.cause = IPMB_CAUSE_SHUTDOWN_THRESHOLD;
+        g_fru_state.power_state = 0;
+        g_fru_state.threshold_exceeded = 1;
+        GPIO_SetBits(PWR_CTL_GPIO_PORT, PWR_CTL_GPIO_PIN);
+        mainboard_power_state = 0;
+        power_state_confirmed = 1;
+        g_pem_event_seq++;
+        taskEXIT_CRITICAL();
+
+        s_shutdown_latched = 1;
+        printf("[SENSOR] AUTO SHUTDOWN: threshold persisted %u rounds (temp=%u volt=%u)\r\n",
+               (unsigned)IPMB_THRESHOLD_SHUTDOWN_PERSIST_ROUNDS,
+               (unsigned)temp_shutdown, (unsigned)volt_shutdown);
+    }
+}
+
+void IPMB_Sensor_ClearShutdownLatch(void)
+{
+    s_shutdown_latched = 0;
+    s_temp_shutdown_persist = 0;
+    s_volt_shutdown_persist = 0;
 }
 
 

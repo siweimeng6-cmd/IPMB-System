@@ -102,6 +102,10 @@
  * field_id 0~6 驱动 Get Device ID(0x01) 响应本体,7~10 是新增自定义文本字段 */
 #define IPMB_CMD_GET_BOARD_IDENTITY  0x17    /* OEM: Get Board Identity Field */
 #define IPMB_CMD_SET_BOARD_IDENTITY  0x18    /* OEM: Set Board Identity Field */
+/* 传感器报警/断电阈值配置(2026-08-21新增,见 ipmb_threshold.c):单条6字节记录,
+ * 不按field_id分字段读写(全局只有一套配置,不像板卡身份那样12个字段各自独立) */
+#define IPMB_CMD_GET_THRESHOLD_CONFIG 0x19   /* OEM: Get Threshold Config */
+#define IPMB_CMD_SET_THRESHOLD_CONFIG 0x1A   /* OEM: Set Threshold Config */
 
 /* 传感器类 (netFn 0x04) */
 #define IPMB_CMD_PEM                 0x02    /* Platform Event Message */

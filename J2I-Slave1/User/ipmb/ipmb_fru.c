@@ -2,6 +2,7 @@
 #include "bsp_init.h"
 #include "bsp_usart.h"  /* powerrst_flag: 复位脉冲由 GPIO 任务异步产生, 见 bsp_gpio.c */
 #include ".\\gpio\\bsp_gpio.h"
+#include "ipmb_sensor.h"  /* IPMB_Sensor_ClearShutdownLatch,见 case 0x01 */
 #define powerrst_flag ipmb_reset_flag
 #include <stdio.h>
 #include <string.h>
@@ -54,6 +55,9 @@ uint8_t IPMB_FRU_HandleControl(uint8_t control_req, const uint8_t* data, uint8_t
         /* 同步状态灯(PA15): 立即开始闪烁, 同上不等 PB5 硬件反馈 */
         mainboard_power_state = 1;
         power_state_confirmed = 1;
+        /* 2026-08-21新增:手动重新上电后,阈值断电的锁存/持续计数要清掉,
+         * 否则一旦触发过一次自动断电,安全监测就永久失效直到MCU复位 */
+        IPMB_Sensor_ClearShutdownLatch();
         printf("[FRU] Power ON (PA4=LOW)\r\n");
         return 0;
 

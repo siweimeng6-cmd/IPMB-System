@@ -2,6 +2,7 @@
 #include "FreeRTOS.h"
 #include ".\i2c\bsp_eeprom.h"
 #include ".\ipmb\ipmb_board_identity.h"
+#include ".\ipmb\ipmb_threshold.h"
 
 
 TaskHandle_t Sensor_Task_Handle = NULL;
@@ -81,6 +82,7 @@ void BSP_Init(void)
 	EEPROM_SelfTest();
 	Runtime_Init();
 	BoardIdentity_Init();
+	ThresholdConfig_Init();
 	#else
 	Init_HARD_I2C();
 	#endif

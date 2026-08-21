@@ -107,6 +107,15 @@ static void slot_poll_one(uint8_t target_addr)
 		if (all_ok) slot->custom_valid = 1;
 	}
 
+	/* 报警/断电阈值配置(2026-08-21新增):全局只有一套,单条Get就能拿全,
+	 * 只读一次(写入成功后 task_ctrl_dispatch.c 会清 threshold_valid 触发重拉) */
+	if (!slot->threshold_valid) {
+		rqseq = s_rqseq;
+		IPMB_Build_GetThresholdConfig(&pkt, target_addr, IPMB_WEB_HOST_ADDR_7BIT, rqseq);
+		s_rqseq = (uint8_t)((s_rqseq + 1) & 0x3F);
+		if (slot_poll_send_wait(&pkt, &rsp, rqseq)) Ipmb_SlotCache_StoreThreshold(slot, &rsp);
+	}
+
 	/* Get Slot 改成跟 Board Status 一样每轮都查,实时反映槽位号/GA 引脚状态
 	 * (原来只在第一次发现时读一次,物理换槽位后网页会长期显示旧值) */
 	rqseq = s_rqseq;

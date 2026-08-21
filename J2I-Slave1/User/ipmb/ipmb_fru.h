@@ -20,7 +20,10 @@ typedef enum {
     IPMB_CAUSE_THRESHOLD_LO  = 0x2,
     IPMB_CAUSE_POWER_ON      = 0x3,
     IPMB_CAUSE_RESET         = 0x4,
-    IPMB_CAUSE_USER_REQUEST  = 0x5
+    IPMB_CAUSE_USER_REQUEST  = 0x5,
+    IPMB_CAUSE_SHUTDOWN_THRESHOLD = 0x6   /* 2026-08-21新增:阈值持续超限触发的自动断电,
+                                              区别于 USER_REQUEST(人为断电),见 ipmb_sensor.c
+                                              IPMB_Sensor_CheckThresholds */
 } IPMB_StateChangeCause_t;
 
 /* FRU / 风扇 / IPMC 全局状态 */

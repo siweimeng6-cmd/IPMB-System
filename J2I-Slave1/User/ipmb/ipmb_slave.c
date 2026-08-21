@@ -7,6 +7,7 @@
 #include ".\gpio\bsp_gpio.h"
 #include ".\i2c\bsp_eeprom.h"  /* g_runtime_total_minutes, 见 IPMB_Slave_Handle_GetBoardStatus */
 #include "ipmb_board_identity.h"  /* g_board_identity, 见 IPMB_Slave_Handle_GetDeviceID/GetBoardIdentity/SetBoardIdentity */
+#include "ipmb_threshold.h"  /* g_threshold_config, 见 IPMB_Slave_Handle_Get/SetThresholdConfig */
 #include <string.h>
 #include <stdio.h>
 
@@ -533,6 +534,57 @@ void IPMB_Slave_Handle_SetBoardIdentity(const uint8_t* req, uint8_t req_len,
 }
 
 /**
+ * @brief  Get Threshold Config(0x19,2026-08-21新增)—— 取当前的报警/断电阈值配置
+ *         (温度上下限+电压百分比,共6字节,见 ipmb_threshold.h),全局只有一套配置,
+ *         不像板卡身份字段那样按field_id区分,请求不需要携带任何数据。
+ */
+void IPMB_Slave_Handle_GetThresholdConfig(const uint8_t* req, uint8_t req_len,
+                                          uint8_t* resp, uint8_t* resp_len,
+                                          uint8_t own_addr)
+{
+    uint8_t rqSA  = req[3];
+    uint8_t rqLun = IPMB_Extract_RqLun(req);
+    uint8_t rqSeq = IPMB_Extract_RqSeq(req);
+    uint8_t data[IPMB_THRESHOLD_CONFIG_LEN];
+    (void)req_len;
+
+    ThresholdConfig_Get(data);
+
+    *resp_len = IPMB_Build_Response(resp, rqSA, IPMB_NETFN_APP, rqLun,
+                                     own_addr, rqSeq, IPMB_CMD_GET_THRESHOLD_CONFIG,
+                                     IPMB_CC_OK, data, sizeof(data));
+}
+
+/**
+ * @brief  Set Threshold Config(0x1A,2026-08-21新增)—— 写入报警/断电阈值配置,立即
+ *         持久化进 EEPROM(见 ThresholdConfig_Set)。请求 data[0..5]=6字节配置(不像
+ *         Set Board Identity 那样带field_id/value_len前缀,固定长度直接传),
+ *         即 req_len 必须等于 13(7字节头尾开销+6字节数据,帧布局推导见
+ *         ipmb_protocol.h 头注释:总数据长度 N = req_len-7)。
+ */
+void IPMB_Slave_Handle_SetThresholdConfig(const uint8_t* req, uint8_t req_len,
+                                          uint8_t* resp, uint8_t* resp_len,
+                                          uint8_t own_addr)
+{
+    uint8_t rqSA  = req[3];
+    uint8_t rqLun = IPMB_Extract_RqLun(req);
+    uint8_t rqSeq = IPMB_Extract_RqSeq(req);
+    uint8_t cc;
+    uint8_t data[1] = { 0 };
+
+    if (req_len < 7) {
+        cc = IPMB_CC_INVALID_DATA_FIELD;
+    } else {
+        uint8_t avail = (uint8_t)(req_len - 7);
+        cc = (ThresholdConfig_Set(&req[6], avail) == 0) ? IPMB_CC_OK : IPMB_CC_INVALID_DATA_FIELD;
+    }
+
+    *resp_len = IPMB_Build_Response(resp, rqSA, IPMB_NETFN_APP, rqLun,
+                                     own_addr, rqSeq, IPMB_CMD_SET_THRESHOLD_CONFIG,
+                                     cc, data, 0);
+}
+
+/**
  * @brief  Platform Event Message(cmd=0x02)—— 拼帧逻辑本身不区分调用来源,
  *         现在有两条触发路径共用这一个函数:
  *           1) 轮询答复:F407 每 5s 发一条 cmd=0x02 请求,经
@@ -824,6 +876,12 @@ uint8_t IPMB_Slave_ProcessRequest(const uint8_t* rx_buf, uint8_t rx_len,
         break;
     case IPMB_CMD_SET_BOARD_IDENTITY:
         IPMB_Slave_Handle_SetBoardIdentity(rx_buf, rx_len, tx_buf, &resp_len, own_addr);
+        break;
+    case IPMB_CMD_GET_THRESHOLD_CONFIG:
+        IPMB_Slave_Handle_GetThresholdConfig(rx_buf, rx_len, tx_buf, &resp_len, own_addr);
+        break;
+    case IPMB_CMD_SET_THRESHOLD_CONFIG:
+        IPMB_Slave_Handle_SetThresholdConfig(rx_buf, rx_len, tx_buf, &resp_len, own_addr);
         break;
     default:
         {

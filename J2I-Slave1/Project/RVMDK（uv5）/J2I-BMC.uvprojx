@@ -714,6 +714,11 @@
               <FileType>1</FileType>
               <FilePath>..\..\User\ipmb\ipmb_board_identity.c</FilePath>
             </File>
+            <File>
+              <FileName>ipmb_threshold.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\..\User\ipmb\ipmb_threshold.c</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
